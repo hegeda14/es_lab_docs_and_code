@@ -23,6 +23,16 @@ static void Switch_1(void *pvParameters);
 static void IRSensors(void *pvParameters);
 static void IRDistance(void *pvParameters);
 
+int IRDistanceDescriptor[][] = {
+    {0, 10}, // 10cm
+    {0, 20}, // 20cm
+    {0, 30}, // 30cm
+    {0, 40}, // 40cm
+    {0, 50}, // 50cm
+    {0, 60}, // 60cm
+    {0, 70}, // 70cm
+    {0, 80}, // 80cm
+};
 
 int main()
 {

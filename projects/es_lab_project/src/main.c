@@ -23,15 +23,13 @@ static void Switch_1(void *pvParameters);
 static void IRSensors(void *pvParameters);
 static void IRDistance(void *pvParameters);
 
-int IRDistanceDescriptor[][] = {
-    {0, 10}, // 10cm
-    {0, 20}, // 20cm
-    {0, 30}, // 30cm
-    {0, 40}, // 40cm
-    {0, 50}, // 50cm
-    {0, 60}, // 60cm
-    {0, 70}, // 70cm
-    {0, 80}, // 80cm
+static uint32_t IRDistanceDescriptor[4][2] = {
+    {4095, 0}, // 0cm
+    {3400, 10}, // 10cm
+    {1900, 20}, // 20cm
+    {1000, 40}, // 40cm
+    {500, 80}, // 80cm
+    {0, 100}, // Overflow protection
 };
 
 int main()
@@ -162,8 +160,9 @@ static void IRDistance(void *pvParameters)
   adc_init();
 
   uint32_t IRDistance0;
+  uint32_t Distance;
 
-  char data[11];
+  char data[21];
 
   while (1)
   {
@@ -171,7 +170,14 @@ static void IRDistance(void *pvParameters)
 
     IRDistance0 = adc_get_value(IRDISTANCE0);
 
-    sprintf(data,"%" PRIu32, IRDistance0);
+    for(uint8_t index = 0; index < 5; index ++) {
+      if(IRDistance0 <= IRDistanceDescriptor[index][0] && IRDistance0 > IRDistanceDescriptor[index+1][0]) {
+        Distance = IRDistanceDescriptor[index][1];
+        break;
+      }
+    }
+
+    sprintf(data,"%" PRIu32 "_%" PRIu32, IRDistance0, Distance);
     traces(data);
   }
 }

@@ -8,22 +8,37 @@
 #include "fft.h"
 #include "wifi.h"
 #include "adc.h"
+#include "queue.h"
 
+#define SWITCH0 DD_PIN_PD14
+#define SWITCH1 DD_PIN_PD15
 #define IRSENSOR0 DD_PIN_PF10
 #define IRSENSOR1 DD_PIN_PF9
 #define IRDISTANCE0 DA_ADC_CHANNEL0
 #define IRDISTANCE1 DA_ADC_CHANNEL1
 
-static void ConfigWiFi();
+QueueHandle_t Switches_Queue;
+QueueHandle_t IRSensors_Queue;
 
 static void StatusLED(void *pvParameters);
-static void Switch_0(void *pvParameters);
-static void Switch_1(void *pvParameters);
+static void MainHandler(void *pvParameters);
+
+static void Switches(void *pvParameters);
 
 static void IRSensors(void *pvParameters);
 static void IRDistance(void *pvParameters);
 
-static uint32_t IRDistanceDescriptor[4][2] = {
+struct Switches {
+  DD_DIP_STATE_T Switch_0;
+  DD_DIP_STATE_T Switch_1;
+};
+
+struct IRSensors {
+  uint16_t IRSensor_0;
+  uint16_t IRSensor_1;
+};
+
+static uint32_t IRDistanceDescriptor[6][2] = {
     {4095, 0}, // 0cm
     {3400, 10}, // 10cm
     {1900, 20}, // 20cm
@@ -35,19 +50,47 @@ static uint32_t IRDistanceDescriptor[4][2] = {
 int main()
 {
     dorobo_init();			//Call dorobo_init() function to initialize HAL, Clocks, Timers etc.	
-	
-    ConfigWiFi();
+    wifi_init();
+    led_red(DD_LEVEL_HIGH);
 
-    //xTaskCreate(blinky, "BLINKYTASK", 512, NULL, 2, NULL);	//create blinky task
-    //xTaskCreate(Switch_0, "SWITCH0", 128, NULL, 3, NULL);
-    //xTaskCreate(Switch_1, "SWITCH1", 128, NULL, 3, NULL);
-    xTaskCreate(IRSensors, "IRSENSORS", 256, NULL, 2, NULL);
-    xTaskCreate(IRDistance, "IRDISTANCE", 256, NULL, 2, NULL);
-    xTaskCreate(StatusLED, "STATUSLED", 128, NULL, 1, NULL);
+    if(xTaskCreate(Switches, "SWITCHES", 128, NULL, 2, NULL) == errCOULD_NOT_ALLOCATE_REQUIRED_MEMORY) traces("SWITCHES ERROR");
+    if(xTaskCreate(IRSensors, "IRSENSORS", 512, NULL, 2, NULL) == errCOULD_NOT_ALLOCATE_REQUIRED_MEMORY) traces("IRSENSORS ERROR");
+    //if(xTaskCreate(IRDistance, "IRDISTANCE", 256, NULL, 2, NULL) == errCOULD_NOT_ALLOCATE_REQUIRED_MEMORY) led_red(DD_LEVEL_HIGH);
+    if(xTaskCreate(MainHandler, "MAINHANDLER", 512, NULL, 2, NULL) == errCOULD_NOT_ALLOCATE_REQUIRED_MEMORY) traces("MAINHANDLER ERROR");
+    //if(xTaskCreate(StatusLED, "STATUSLED", 128, NULL, 1, NULL) == errCOULD_NOT_ALLOCATE_REQUIRED_MEMORY) traces("STATUSLED ERROR");
+
+    Switches_Queue = xQueueCreate(1, sizeof(struct Switches*));
+    Switches_Queue = xQueueCreate(1, sizeof(struct IRSensors*));
 
     vTaskStartScheduler();	//start the freertos scheduler
 
-	return 0;				//should not be reached!
+  return 0;				//should not be reached!
+}
+
+static void MainHandler(void *pvParameters)
+{
+  portBASE_TYPE Status;
+
+  struct Switches Switches_State;
+  struct IRSensors IRSensors_Value;
+
+  while (1)
+  {
+    vTaskDelay(5);
+
+    traces("MAINHANDLER");
+
+    Status = xQueueReceive(Switches_Queue, &Switches_State, 0);
+    //Status = xQueueReceive(IRSensors_Queue, &IRSensors_Value, 0);
+
+    if(Status == pdPASS) {
+      //char data[16];
+      //sprintf(data, "%d_%d_" PRIu16 "_" PRIu16, Switches_State.Switch_0, Switches_State.Switch_1, IRSensors_Value.IRSensor_0, IRSensors_Value.IRSensor_1);
+      char data[5];
+      sprintf(data, "%d_%d_", Switches_State.Switch_0, Switches_State.Switch_1);
+      traces(data);
+    }
+  }
 }
 
 static void StatusLED(void *pvParameters)
@@ -56,101 +99,57 @@ static void StatusLED(void *pvParameters)
 
   while (1)
   {
-    led_green_toggle();
+    // Shows, that the board is still operating
     vTaskDelay(20);        //delay the task for 20 ticks (1 ticks = 50 ms)
+    led_green_toggle();
   }
 }
 
-static void Switch_1(void *pvParameters)
+static void Switches(void *pvParameters)
 {
 	trace_init();
-
-	digital_configure_pin(DD_PIN_PD14, DD_CFG_INPUT_PULLUP);
-	//digital_set_pin(DD_PIN_PF10, DD_LEVEL_HIGH);
+	// Configure the defined pins as pullup input
+	digital_configure_pin(SWITCH0, DD_CFG_INPUT_PULLUP);
+	digital_configure_pin(SWITCH1, DD_CFG_INPUT_PULLUP);
+	// Set the variable, which holds the state
+	struct Switches Switches_State;
 
 	while (1) 
 	{
-	  vTaskDelay(20);
-
-		if(digital_get_pin(DD_PIN_PD14) == DD_LEVEL_HIGH)
-		  led_green(DD_LED_OFF);
-		else
-		  led_green(DD_LED_ON);
+	  // Wait for ~500ms
+	  vTaskDelay(10);
+	  // Read the pins state into a struct
+	  Switches_State.Switch_0 = digital_get_pin(SWITCH0);
+	  Switches_State.Switch_1 = digital_get_pin(SWITCH1);
+	  // Send the pins state into the queue
+	  xQueueSend(Switches_Queue, (void*)&Switches_State, 0);
 	}
-}
-
-
-
-static void Switch_0(void *pvParameters)
-{
-  trace_init();
-
-  digital_configure_pin(DD_PIN_PD15, DD_CFG_INPUT_PULLUP);
-  //digital_configure_pin(DD_PIN_PF9, DD_CFG_OUTPUT);
-  //digital_set_pin(DD_PIN_PF9, DD_LEVEL_HIGH);
-
-  while (1)
-  {
-    vTaskDelay(20);
-
-    if(digital_get_pin(DD_PIN_PD15) == DD_LEVEL_HIGH)
-      led_red(DD_LED_OFF);
-    else
-      led_red(DD_LED_ON);
-
-    //vTaskSuspend(NULL);
-
-    /*vTaskDelay(200);
-    digital_set_pin(DD_PIN_PF9, DD_LEVEL_HIGH);
-    vTaskDelay(200);
-    digital_set_pin(DD_PIN_PF9, DD_LEVEL_LOW);*/
-
-  }
-}
-
-
-
-static void ConfigWiFi()
-{
-  trace_init();
-
-  wifi_init();
 }
 
 static void IRSensors(void *pvParameters)
 {
   trace_init();
   ft_init();
-
+  // Configure the defined pins as pullup input
   digital_configure_pin(IRSENSOR0, DD_CFG_INPUT_PULLUP);
   digital_configure_pin(IRSENSOR1, DD_CFG_INPUT_PULLUP);
-
-  uint16_t IRSensor0;
-  uint16_t IRSensor1;
-  char data[14];
+  // Set the variable, which holds the measurements
+  struct IRSensors IRSensors_Value;
 
   while (1)
   {
+    vTaskDelay(10);
+
     ft_start_sampling(IRSENSOR0);
-
-    while(!ft_is_sampling_finished())
-    {
-      vTaskDelay(1);
-    }
-
-    IRSensor0 = ft_get_transform(DFT_FREQ100);
+    while(!ft_is_sampling_finished()) vTaskDelay(1);
+    IRSensors_Value.IRSensor_0 = ft_get_transform(DFT_FREQ100);
 
     ft_start_sampling(IRSENSOR1);
+    while(!ft_is_sampling_finished()) vTaskDelay(1);
+    IRSensors_Value.IRSensor_1 = ft_get_transform(DFT_FREQ100);
 
-    while(!ft_is_sampling_finished())
-    {
-      vTaskDelay(1);
-    }
-
-    IRSensor1 = ft_get_transform(DFT_FREQ100);
-
-    //sprintf(data,"%" PRIu16 "_%" PRIu16, IRSensor0, IRSensor1);
-    //traces(data);
+    // Send the pins state into the queue
+    xQueueSend(IRSensors_Queue, (void*)&IRSensors_Value, 0);
   }
 }
 
@@ -176,9 +175,6 @@ static void IRDistance(void *pvParameters)
         break;
       }
     }
-
-    sprintf(data,"%" PRIu32 "_%" PRIu32, IRDistance0, Distance);
-    traces(data);
   }
 }
 

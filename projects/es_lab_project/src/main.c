@@ -26,18 +26,18 @@
 #define SWITCHOFF DD_LEVEL_HIGH
 
 struct Switches {
-  DD_DIP_STATE_T Switch_0;
-  DD_DIP_STATE_T Switch_1;
+  DD_DIP_STATE_T Switch_Right;
+  DD_DIP_STATE_T Switch_Left;
 };
 
 struct IRSensors {
-  uint16_t IRSensor_0;
-  uint16_t IRSensor_1;
+  uint16_t IRSensor_Right;
+  uint16_t IRSensor_Left;
 };
 
 struct IRDistances {
-  uint16_t IRDistance_0;
-  uint16_t IRDistance_1;
+  uint16_t IRDistance_Right;
+  uint16_t IRDistance_Left;
 };
 
 enum MOTOR_SPEEDS {
@@ -46,11 +46,17 @@ enum MOTOR_SPEEDS {
 };
 typedef enum MOTOR_SPEEDS MOTOR_SPEED;
 
-enum MOTOR_DIRECTIONS {
+enum GO_DIRECTIONS {
     FORWARD = 1,
     BACKWARD = -1
 };
-typedef enum MOTOR_DIRECTIONS MOTOR_DIRECTION;
+typedef enum GO_DIRECTIONS GO_DIRECTION;
+
+enum TURN_DIRECTIONS {
+    RIGHT = 1,
+    LEFT = -1
+};
+typedef enum TURN_DIRECTIONS TURN_DIRECTION;
 
 struct MotorsCommand {
   int8_t Speed_0;
@@ -83,8 +89,8 @@ static void IRDistances(void *pvParameters);
 // Actuators
 static void Motors(void *pvParameters);
 // Auxiliary
-static void RoverGo(MOTOR_SPEED, MOTOR_DIRECTION);
-static void RoverTurn(MOTOR_SPEED);
+static void RoverGo(MOTOR_SPEED, GO_DIRECTION);
+static void RoverTurn(MOTOR_SPEED, TURN_DIRECTION);
 static void RoverStop();
 
 int main()
@@ -121,8 +127,8 @@ static void MainHandler(void *pvParameters)
 
   while (1)
   {
-    // Wait for ~100ms
-    vTaskDelay(2);
+    // Wait for 100ms
+    vTaskDelay(100/portTICK_PERIOD_MS);
 
     Status = xQueueReceive(Switches_Queue, &Switches_State, 5);
     Status = xQueueReceive(IRSensors_Queue, &IRSensors_Value, 5);
@@ -137,31 +143,31 @@ static void MainHandler(void *pvParameters)
     // 6. If collision detected -> Stop -> Go backwards -> Stop -> Turn -> Direction?
 
     // Implement controlling logic
-    if(Switches_State.Switch_0 == SWITCHON) {
+    if(Switches_State.Switch_Right == SWITCHON) {
       //RoverTurn(LOWSPEED);
       RoverGo(FULLSPEED, FORWARD);
     }
 
-    if(Switches_State.Switch_1 == SWITCHON) {
+    if(Switches_State.Switch_Left == SWITCHON) {
       RoverStop();
       RoverGo(FULLSPEED, BACKWARD);
-      vTaskDelay(100);
+      vTaskDelay(5000/portTICK_PERIOD_MS);
       RoverStop();
-      RoverTurn(LOWSPEED);
-      vTaskDelay(60);
+      RoverTurn(LOWSPEED, RIGHT);
+      vTaskDelay(3000/portTICK_PERIOD_MS);
       RoverStop();
     }
     // ----- *** -----
 
     if(Status == pdPASS) {
       char data[28];
-      sprintf(data, "%d_%d_%" PRIu16 "_%" PRIu16 "_%" PRIu16 "_%" PRIu16, Switches_State.Switch_0, Switches_State.Switch_1, IRSensors_Value.IRSensor_0, IRSensors_Value.IRSensor_1, IRDistances_Value.IRDistance_0, IRDistances_Value.IRDistance_1);
+      sprintf(data, "%d_%d_%" PRIu16 "_%" PRIu16 "_%" PRIu16 "_%" PRIu16, Switches_State.Switch_Right, Switches_State.Switch_Left, IRSensors_Value.IRSensor_Right, IRSensors_Value.IRSensor_Left, IRDistances_Value.IRDistance_Right, IRDistances_Value.IRDistance_Left);
       traces(data);
     }
   }
 }
 
-static void RoverGo(MOTOR_SPEED speed, MOTOR_DIRECTION direction) {
+static void RoverGo(MOTOR_SPEED speed, GO_DIRECTION direction) {
   struct MotorsCommand Motors_Speeds;
   Motors_Speeds.Speed_0 = 0;
   Motors_Speeds.Speed_1 = speed * direction;
@@ -169,11 +175,11 @@ static void RoverGo(MOTOR_SPEED speed, MOTOR_DIRECTION direction) {
   xQueueSend(Motors_Queue, (void*)&Motors_Speeds, 2);
 }
 
-static void RoverTurn(MOTOR_SPEED speed) {
+static void RoverTurn(MOTOR_SPEED speed, TURN_DIRECTION direction) {
   struct MotorsCommand Motors_Speeds;
-  Motors_Speeds.Speed_0 = speed;
-  Motors_Speeds.Speed_1 = speed;
-  Motors_Speeds.Speed_2 = speed;
+  Motors_Speeds.Speed_0 = speed * direction;
+  Motors_Speeds.Speed_1 = speed * direction;
+  Motors_Speeds.Speed_2 = speed * direction;
   xQueueSend(Motors_Queue, (void*)&Motors_Speeds, 2);
 }
 
@@ -197,8 +203,8 @@ static void Motors(void *pvParameters)
 
   while (1)
   {
-    // Wait for ~100ms
-    vTaskDelay(2);
+    // Wait for 100ms
+    vTaskDelay(100/portTICK_PERIOD_MS);
     // Get the next instruction from the queue
     Status = xQueueReceive(Motors_Queue, &Motors_Speeds, 2);
     // Process it
@@ -218,7 +224,8 @@ static void StatusLED(void *pvParameters)
   while (1)
   {
     // Shows, that the board is still operating
-    vTaskDelay(20);        //delay the task for 20 ticks (1 ticks = 50 ms)
+    // Wait for 1000ms (1 second)
+    vTaskDelay(1000/portTICK_PERIOD_MS);
     led_green_toggle();
   }
 }
@@ -234,11 +241,11 @@ static void Switches(void *pvParameters)
 
 	while (1) 
 	{
-	  // Wait for ~250ms
-	  vTaskDelay(5);
+	  // Wait for 250ms
+	  vTaskDelay(250/portTICK_PERIOD_MS);
 	  // Read the pins state into a struct
-	  Switches_State.Switch_0 = digital_get_pin(SWITCH0);
-	  Switches_State.Switch_1 = digital_get_pin(SWITCH1);
+	  Switches_State.Switch_Right = digital_get_pin(SWITCH0);
+	  Switches_State.Switch_Left = digital_get_pin(SWITCH1);
 	  // Send the pins state into the queue
 	  xQueueSend(Switches_Queue, (void*)&Switches_State, 2);
 	}
@@ -256,16 +263,16 @@ static void IRSensors(void *pvParameters)
 
   while (1)
   {
-    // Wait for ~250ms
-    vTaskDelay(5);
+    // Wait for 250ms
+    vTaskDelay(250/portTICK_PERIOD_MS);
     // Sample from the first sensor
     ft_start_sampling(IRSENSOR0);
-    while(!ft_is_sampling_finished()) vTaskDelay(1);
-    IRSensors_Value.IRSensor_0 = ft_get_transform(DFT_FREQ100);
+    while(!ft_is_sampling_finished()) vTaskDelay(50/portTICK_PERIOD_MS); // Wait for 50ms
+    IRSensors_Value.IRSensor_Right = ft_get_transform(DFT_FREQ100);
     // Sample from the second sensor
     ft_start_sampling(IRSENSOR1);
-    while(!ft_is_sampling_finished()) vTaskDelay(1);
-    IRSensors_Value.IRSensor_1 = ft_get_transform(DFT_FREQ100);
+    while(!ft_is_sampling_finished()) vTaskDelay(50/portTICK_PERIOD_MS); // Wait for 50ms
+    IRSensors_Value.IRSensor_Left = ft_get_transform(DFT_FREQ100);
     // Send the pins state into the queue
     xQueueSend(IRSensors_Queue, (void*)&IRSensors_Value, 2);
   }
@@ -281,28 +288,28 @@ static void IRDistances(void *pvParameters)
   while (1)
   {
     // Read the average of five samples into a struct
-    IRDistances_Value.IRDistance_0 = 0;
-    IRDistances_Value.IRDistance_1 = 0;
+    IRDistances_Value.IRDistance_Right = 0;
+    IRDistances_Value.IRDistance_Left = 0;
     for(uint8_t index = 0; index < 5; index ++) {
-      IRDistances_Value.IRDistance_0 += (uint16_t)adc_get_value(IRDISTANCE0);
-      IRDistances_Value.IRDistance_1 += (uint16_t)adc_get_value(IRDISTANCE1);
-      // Wait for ~50ms
-      vTaskDelay(1);
+      IRDistances_Value.IRDistance_Right += (uint16_t)adc_get_value(IRDISTANCE0);
+      IRDistances_Value.IRDistance_Left += (uint16_t)adc_get_value(IRDISTANCE1);
+      // Wait for 50ms
+      vTaskDelay(50/portTICK_PERIOD_MS);
     }
-    IRDistances_Value.IRDistance_0 /= 5;
-    IRDistances_Value.IRDistance_1 /= 5;
+    IRDistances_Value.IRDistance_Right /= 5;
+    IRDistances_Value.IRDistance_Left /= 5;
 
     // Calculate the first distance from the lookup table
     for(uint8_t index = 0; index < 5; index ++) {
-      if(IRDistances_Value.IRDistance_0 <= IRDistancesLookupTable[index][0] && IRDistances_Value.IRDistance_0 > IRDistancesLookupTable[index+1][0]) {
-        IRDistances_Value.IRDistance_0 = IRDistancesLookupTable[index][1];
+      if(IRDistances_Value.IRDistance_Right <= IRDistancesLookupTable[index][0] && IRDistances_Value.IRDistance_Right > IRDistancesLookupTable[index+1][0]) {
+        IRDistances_Value.IRDistance_Right = IRDistancesLookupTable[index][1];
         break;
       }
     }
     // Calculate the second distance from the lookup table
     for(uint8_t index = 0; index < 5; index ++) {
-      if(IRDistances_Value.IRDistance_1 <= IRDistancesLookupTable[index][0] && IRDistances_Value.IRDistance_1 > IRDistancesLookupTable[index+1][0]) {
-        IRDistances_Value.IRDistance_1 = IRDistancesLookupTable[index][1];
+      if(IRDistances_Value.IRDistance_Left <= IRDistancesLookupTable[index][0] && IRDistances_Value.IRDistance_Left > IRDistancesLookupTable[index+1][0]) {
+        IRDistances_Value.IRDistance_Left = IRDistancesLookupTable[index][1];
         break;
       }
     }

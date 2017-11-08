@@ -127,8 +127,8 @@ static void MainHandler(void *pvParameters)
 
   while (1)
   {
-    // Wait for 100ms
-    vTaskDelay(100/portTICK_PERIOD_MS);
+    // Wait for 50ms
+    vTaskDelay(50/portTICK_PERIOD_MS);
 
     Status = xQueueReceive(Switches_Queue, &Switches_State, 5);
     Status = xQueueReceive(IRSensors_Queue, &IRSensors_Value, 5);
@@ -204,7 +204,7 @@ static void Motors(void *pvParameters)
   while (1)
   {
     // Wait for 100ms
-    vTaskDelay(100/portTICK_PERIOD_MS);
+    vTaskDelay(50/portTICK_PERIOD_MS);
     // Get the next instruction from the queue
     Status = xQueueReceive(Motors_Queue, &Motors_Speeds, 2);
     // Process it
@@ -224,8 +224,8 @@ static void StatusLED(void *pvParameters)
   while (1)
   {
     // Shows, that the board is still operating
-    // Wait for 1000ms (1 second)
-    vTaskDelay(1000/portTICK_PERIOD_MS);
+    // Wait for 500ms (1 second)
+    vTaskDelay(500/portTICK_PERIOD_MS);
     led_green_toggle();
   }
 }
@@ -241,8 +241,8 @@ static void Switches(void *pvParameters)
 
 	while (1) 
 	{
-	  // Wait for 250ms
-	  vTaskDelay(250/portTICK_PERIOD_MS);
+	  // Wait for 100ms
+	  vTaskDelay(100/portTICK_PERIOD_MS);
 	  // Read the pins state into a struct
 	  Switches_State.Switch_Right = digital_get_pin(SWITCH0);
 	  Switches_State.Switch_Left = digital_get_pin(SWITCH1);
@@ -263,8 +263,8 @@ static void IRSensors(void *pvParameters)
 
   while (1)
   {
-    // Wait for 250ms
-    vTaskDelay(250/portTICK_PERIOD_MS);
+    // Wait for 100ms
+    vTaskDelay(100/portTICK_PERIOD_MS);
     // Sample from the first sensor
     ft_start_sampling(IRSENSOR0);
     while(!ft_is_sampling_finished()) vTaskDelay(50/portTICK_PERIOD_MS); // Wait for 50ms
@@ -293,8 +293,8 @@ static void IRDistances(void *pvParameters)
     for(uint8_t index = 0; index < 5; index ++) {
       IRDistances_Value.IRDistance_Right += (uint16_t)adc_get_value(IRDISTANCE0);
       IRDistances_Value.IRDistance_Left += (uint16_t)adc_get_value(IRDISTANCE1);
-      // Wait for 50ms
-      vTaskDelay(50/portTICK_PERIOD_MS);
+      // Wait for 20ms
+      vTaskDelay(20/portTICK_PERIOD_MS);
     }
     IRDistances_Value.IRDistance_Right /= 5;
     IRDistances_Value.IRDistance_Left /= 5;

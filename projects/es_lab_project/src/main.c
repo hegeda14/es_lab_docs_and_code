@@ -15,15 +15,17 @@
 #define SWITCH1 DD_PIN_PD15
 #define IRSENSOR0 DD_PIN_PF10
 #define IRSENSOR1 DD_PIN_PF9
-#define IRDISTANCE0 DA_ADC_CHANNEL0
-#define IRDISTANCE1 DA_ADC_CHANNEL1
+#define IRDISTANCE0 DA_ADC_CHANNEL1
+#define IRDISTANCE1 DA_ADC_CHANNEL0
 
-#define MOTOR0 DM_MOTOR0
-#define MOTOR1 DM_MOTOR1
-#define MOTOR2 DM_MOTOR2
+#define MOTOR0 DM_MOTOR1
+#define MOTOR1 DM_MOTOR2
+#define MOTOR2 DM_MOTOR0
 
 #define SWITCHON DD_LEVEL_LOW
 #define SWITCHOFF DD_LEVEL_HIGH
+
+#define ONSWITCH DD_DIP1
 
 struct Switches {
   DD_DIP_STATE_T Switch_Right;
@@ -47,14 +49,14 @@ enum MOTOR_SPEEDS {
 typedef enum MOTOR_SPEEDS MOTOR_SPEED;
 
 enum GO_DIRECTIONS {
-    FORWARD = 1,
-    BACKWARD = -1
+    FORWARD = -1,
+    BACKWARD = 1
 };
 typedef enum GO_DIRECTIONS GO_DIRECTION;
 
 enum TURN_DIRECTIONS {
-    RIGHT = 1,
-    LEFT = -1
+    RIGHT = -1,
+    LEFT = 1
 };
 typedef enum TURN_DIRECTIONS TURN_DIRECTION;
 
@@ -93,11 +95,12 @@ static void RoverGo(MOTOR_SPEED, GO_DIRECTION);
 static void RoverTurn(MOTOR_SPEED, TURN_DIRECTION);
 static void RoverStop();
 
+static void SearchTarget(struct IRSensors);
+
 int main()
 {
     dorobo_init();			//Call dorobo_init() function to initialize HAL, Clocks, Timers etc.	
     wifi_init();
-    led_red(DD_LEVEL_HIGH);
 
     if(xTaskCreate(Motors, "MOTORS", 64, NULL, 2, NULL) == errCOULD_NOT_ALLOCATE_REQUIRED_MEMORY) traces("MOTORS ERROR");
     if(xTaskCreate(Switches, "SWITCHES", 64, NULL, 2, NULL) == errCOULD_NOT_ALLOCATE_REQUIRED_MEMORY) traces("SWITCHES ERROR");
@@ -119,20 +122,31 @@ int main()
 
 static void MainHandler(void *pvParameters)
 {
-  portBASE_TYPE Status;
-
   struct Switches Switches_State;
   struct IRSensors IRSensors_Value;
   struct IRDistances IRDistances_Value;
 
+  // Wait for 1 second
+  vTaskDelay(1000/portTICK_PERIOD_MS);
+
+  // Main power switch configuration
+  digital_configure_pin(ONSWITCH, DD_CFG_INPUT_PULLUP);
+
   while (1)
   {
+    // Stop the rover in runtime
+    if(digital_get_dip(ONSWITCH) == DD_DIP_OFF) {
+      RoverStop();
+      // Block the main thread
+      while(digital_get_dip(ONSWITCH) == DD_DIP_OFF);
+    }
+
     // Wait for 50ms
     vTaskDelay(50/portTICK_PERIOD_MS);
 
-    Status = xQueueReceive(Switches_Queue, &Switches_State, 5);
-    Status = xQueueReceive(IRSensors_Queue, &IRSensors_Value, 5);
-    Status = xQueueReceive(IRDistances_Queue, &IRDistances_Value, 5);
+    xQueueReceive(Switches_Queue, &Switches_State, 0);
+    xQueueReceive(IRSensors_Queue, &IRSensors_Value, 0);
+    xQueueReceive(IRDistances_Queue, &IRDistances_Value, 0);
 
     // What we should do;
     // 1. Turn, until all of the IRSensors receiving
@@ -143,27 +157,102 @@ static void MainHandler(void *pvParameters)
     // 6. If collision detected -> Stop -> Go backwards -> Stop -> Turn -> Direction?
 
     // Implement controlling logic
-    if(Switches_State.Switch_Right == SWITCHON) {
-      //RoverTurn(LOWSPEED);
+
+
+    /*if(Switches_State.Switch_Right == SWITCHON || Switches_State.Switch_Left == SWITCHON) {
+      RoverStop();
+      RoverGo(FULLSPEED, BACKWARD);
+      vTaskDelay(1000/portTICK_PERIOD_MS);
+      RoverStop();
+
+      if(Switches_State.Switch_Right == SWITCHON && Switches_State.Switch_Left == SWITCHOFF)
+        RoverTurn(LOWSPEED, LEFT);
+      else
+        RoverTurn(LOWSPEED, RIGHT);
+
+      vTaskDelay(1000/portTICK_PERIOD_MS);
+      RoverStop();
+
+      while(Switches_State.Switch_Right == SWITCHON || Switches_State.Switch_Left == SWITCHON) {
+        xQueueReceive(Switches_Queue, &Switches_State, 0);
+        if(Switches_State.Switch_Right == SWITCHOFF && Switches_State.Switch_Left == SWITCHOFF) break;
+        // Wait for 50ms
+        vTaskDelay(50/portTICK_PERIOD_MS);
+
+      }
+
+    } else {
+      RoverGo(FULLSPEED, FORWARD);
+    }*/
+
+
+    if(IRDistances_Value.IRDistance_Right <= 10 || IRDistances_Value.IRDistance_Left <= 10) {
+      RoverStop();
+      if(IRDistances_Value.IRDistance_Right <= 10 && IRDistances_Value.IRDistance_Left > 10) {
+        xQueueReceive(IRSensors_Queue, &IRSensors_Value, 0);
+        RoverTurn(LOWSPEED, LEFT);
+        vTaskDelay(1000/portTICK_PERIOD_MS);
+        RoverStop();
+      }
+      else if(IRDistances_Value.IRDistance_Right > 10 && IRDistances_Value.IRDistance_Left <= 10) {
+        xQueueReceive(IRSensors_Queue, &IRSensors_Value, 0);
+        RoverTurn(LOWSPEED, RIGHT);
+        vTaskDelay(1000/portTICK_PERIOD_MS);
+        RoverStop();
+      } else {
+        xQueueReceive(IRSensors_Queue, &IRSensors_Value, 0);
+        RoverGo(FULLSPEED, BACKWARD);
+        vTaskDelay(1000/portTICK_PERIOD_MS);
+        RoverStop();
+        RoverTurn(LOWSPEED, RIGHT);
+        vTaskDelay(1000/portTICK_PERIOD_MS);
+        RoverStop();
+
+      }
+    } else {
       RoverGo(FULLSPEED, FORWARD);
     }
 
-    if(Switches_State.Switch_Left == SWITCHON) {
-      RoverStop();
-      RoverGo(FULLSPEED, BACKWARD);
-      vTaskDelay(5000/portTICK_PERIOD_MS);
-      RoverStop();
-      RoverTurn(LOWSPEED, RIGHT);
-      vTaskDelay(3000/portTICK_PERIOD_MS);
-      RoverStop();
-    }
+
+
+    // Main task -> Keep the target locked
+    // If lost, then search for it!
+    //if(IRSensors_Value.IRSensor_Right == 0 || IRSensors_Value.IRSensor_Left == 0)
+    //  SearchTarget(IRSensors_Value);
+    // We have the target on lock, go!
+    //else {
+      /*RoverGo(FULLSPEED, FORWARD);
+      // Collision avoiding
+      if(IRDistances_Value.IRDistance_Right == IRDistancesLookupTable[1][2]) {
+        RoverStop();
+        RoverTurn(LOWSPEED, LEFT);
+        vTaskDelay(1000/portTICK_PERIOD_MS);
+        RoverGo();
+        vTaskDelay(1000/portTICK_PERIOD_MS);
+        RoverStop();
+      }
+
+      if(IRDistances_Value.IRDistance_Left == IRDistancesLookupTable[1][2]) {
+        RoverStop();
+        RoverTurn(LOWSPEED, RIGHT);
+        vTaskDelay(1000/portTICK_PERIOD_MS);
+        RoverGo();
+        vTaskDelay(1000/portTICK_PERIOD_MS);
+        RoverStop();
+      }*/
+    //}
     // ----- *** -----
 
-    if(Status == pdPASS) {
-      char data[28];
-      sprintf(data, "%d_%d_%" PRIu16 "_%" PRIu16 "_%" PRIu16 "_%" PRIu16, Switches_State.Switch_Right, Switches_State.Switch_Left, IRSensors_Value.IRSensor_Right, IRSensors_Value.IRSensor_Left, IRDistances_Value.IRDistance_Right, IRDistances_Value.IRDistance_Left);
-      traces(data);
-    }
+    /*char data[28];
+    sprintf(data, "%d_%d_%" PRIu16 "_%" PRIu16 "_%" PRIu16 "_%" PRIu16, Switches_State.Switch_Right, Switches_State.Switch_Left, IRSensors_Value.IRSensor_Right, IRSensors_Value.IRSensor_Left, IRDistances_Value.IRDistance_Right, IRDistances_Value.IRDistance_Left);
+    traces(data);*/
+  }
+}
+
+static void SearchTarget(struct IRSensors IRSensors_Value) {
+  RoverTurn(LOWSPEED, RIGHT);
+  if(IRSensors_Value.IRSensor_Right != 0 && IRSensors_Value.IRSensor_Left != 0) {
+    RoverStop();
   }
 }
 
@@ -172,7 +261,7 @@ static void RoverGo(MOTOR_SPEED speed, GO_DIRECTION direction) {
   Motors_Speeds.Speed_0 = 0;
   Motors_Speeds.Speed_1 = speed * direction;
   Motors_Speeds.Speed_2 = speed * direction * (-1);
-  xQueueSend(Motors_Queue, (void*)&Motors_Speeds, 2);
+  xQueueSend(Motors_Queue, (void*)&Motors_Speeds, 100/portTICK_PERIOD_MS);
 }
 
 static void RoverTurn(MOTOR_SPEED speed, TURN_DIRECTION direction) {
@@ -180,7 +269,7 @@ static void RoverTurn(MOTOR_SPEED speed, TURN_DIRECTION direction) {
   Motors_Speeds.Speed_0 = speed * direction;
   Motors_Speeds.Speed_1 = speed * direction;
   Motors_Speeds.Speed_2 = speed * direction;
-  xQueueSend(Motors_Queue, (void*)&Motors_Speeds, 2);
+  xQueueSend(Motors_Queue, (void*)&Motors_Speeds, 100/portTICK_PERIOD_MS);
 }
 
 static void RoverStop() {
@@ -188,7 +277,7 @@ static void RoverStop() {
   Motors_Speeds.Speed_0 = 0;
   Motors_Speeds.Speed_1 = 0;
   Motors_Speeds.Speed_2 = 0;
-  xQueueSend(Motors_Queue, (void*)&Motors_Speeds, 2);
+  xQueueSend(Motors_Queue, (void*)&Motors_Speeds, 100/portTICK_PERIOD_MS);
   // Default 500ms delay after stop
   vTaskDelay(500/portTICK_PERIOD_MS);
 }
@@ -203,10 +292,10 @@ static void Motors(void *pvParameters)
 
   while (1)
   {
-    // Wait for 100ms
+    // Wait for 50ms
     vTaskDelay(50/portTICK_PERIOD_MS);
     // Get the next instruction from the queue
-    Status = xQueueReceive(Motors_Queue, &Motors_Speeds, 2);
+    Status = xQueueReceive(Motors_Queue, &Motors_Speeds, 100/portTICK_PERIOD_MS);
     // Process it
     if(Status == pdPASS) {
       motor_set(MOTOR0, Motors_Speeds.Speed_0);
@@ -247,7 +336,7 @@ static void Switches(void *pvParameters)
 	  Switches_State.Switch_Right = digital_get_pin(SWITCH0);
 	  Switches_State.Switch_Left = digital_get_pin(SWITCH1);
 	  // Send the pins state into the queue
-	  xQueueSend(Switches_Queue, (void*)&Switches_State, 2);
+	  xQueueSend(Switches_Queue, (void*)&Switches_State, 0);
 	}
 }
 
@@ -274,7 +363,7 @@ static void IRSensors(void *pvParameters)
     while(!ft_is_sampling_finished()) vTaskDelay(50/portTICK_PERIOD_MS); // Wait for 50ms
     IRSensors_Value.IRSensor_Left = ft_get_transform(DFT_FREQ100);
     // Send the pins state into the queue
-    xQueueSend(IRSensors_Queue, (void*)&IRSensors_Value, 2);
+    xQueueSend(IRSensors_Queue, (void*)&IRSensors_Value, 0);
   }
 }
 
@@ -314,6 +403,6 @@ static void IRDistances(void *pvParameters)
       }
     }
     // Send the pins state into the queue
-    xQueueSend(IRDistances_Queue, (void*)&IRDistances_Value, 2);
+    xQueueSend(IRDistances_Queue, (void*)&IRDistances_Value, 0);
   }
 }

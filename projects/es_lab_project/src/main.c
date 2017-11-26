@@ -250,7 +250,7 @@ static void RoverGo(MOTOR_SPEED speed, GO_DIRECTION direction) {
   Motors_Speeds.Speed_0 = 0;
   Motors_Speeds.Speed_1 = speed * direction;
   Motors_Speeds.Speed_2 = speed * direction * (-1);
-  xQueueSend(Motors_Queue, (void*)&Motors_Speeds, 100/portTICK_PERIOD_MS);
+  xQueueOverwrite(Motors_Queue, (void*)&Motors_Speeds);
 }
 
 static void RoverChangeDirection(MOTOR_SPEED speed, TURN_DIRECTION direction) {
@@ -258,10 +258,7 @@ static void RoverChangeDirection(MOTOR_SPEED speed, TURN_DIRECTION direction) {
   Motors_Speeds.Speed_0 = direction * FULLSPEED;
   Motors_Speeds.Speed_1 = LOWSPEED;
   Motors_Speeds.Speed_2 = LOWSPEED;
-  xQueueSend(Motors_Queue, (void*)&Motors_Speeds, 100/portTICK_PERIOD_MS);
-
-  vTaskDelay(1000/portTICK_PERIOD_MS);
-  RoverGo(FULLSPEED, FORWARD);
+  xQueueOverwrite(Motors_Queue, (void*)&Motors_Speeds);
 }
 
 static void RoverTurn(MOTOR_SPEED speed, TURN_DIRECTION direction) {
@@ -269,7 +266,7 @@ static void RoverTurn(MOTOR_SPEED speed, TURN_DIRECTION direction) {
   Motors_Speeds.Speed_0 = speed * direction;
   Motors_Speeds.Speed_1 = speed * direction;
   Motors_Speeds.Speed_2 = speed * direction;
-  xQueueSend(Motors_Queue, (void*)&Motors_Speeds, 100/portTICK_PERIOD_MS);
+  xQueueOverwrite(Motors_Queue, (void*)&Motors_Speeds);
 }
 
 static void RoverStop() {
@@ -277,7 +274,7 @@ static void RoverStop() {
   Motors_Speeds.Speed_0 = 0;
   Motors_Speeds.Speed_1 = 0;
   Motors_Speeds.Speed_2 = 0;
-  xQueueSend(Motors_Queue, (void*)&Motors_Speeds, 100/portTICK_PERIOD_MS);
+  xQueueOverwrite(Motors_Queue, (void*)&Motors_Speeds);
   // Default 500ms delay after stop
   vTaskDelay(500/portTICK_PERIOD_MS);
 }

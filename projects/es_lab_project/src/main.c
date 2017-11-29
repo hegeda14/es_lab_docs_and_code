@@ -43,6 +43,7 @@ struct IRDistances {
 };
 
 enum MOTOR_SPEEDS {
+	NOMODIFY = -1,
     LOWSPEED = 50,
     FULLSPEED = 75
 };
@@ -140,12 +141,13 @@ static void MainHandler(void *pvParameters)
       RoverStop();
       // Block the main thread
       while(digital_get_dip(ONSWITCH) == DD_DIP_OFF);
+      // Wait for 2 second
+      vTaskDelay(2000/portTICK_PERIOD_MS);
     }
 
-    // Wait for 50ms
-    vTaskDelay(50/portTICK_PERIOD_MS);
+    // Wait for 20ms
+    vTaskDelay(20/portTICK_PERIOD_MS);
 
-    bool GO = true;
 
     xQueueReceive(Switches_Queue, &Switches_State, 0);
     xQueueReceive(IRSensors_Queue, &IRSensors_Value, 0);
@@ -161,6 +163,7 @@ static void MainHandler(void *pvParameters)
 
     // Implement controlling logic
 
+    bool GO = true;
 
     if(Switches_State.Switch_Right == SWITCHON || Switches_State.Switch_Left == SWITCHON) {
       RoverStop();
@@ -178,22 +181,43 @@ static void MainHandler(void *pvParameters)
     }
 
 
-    if(IRDistances_Value.IRDistance_Right <= 10 || IRDistances_Value.IRDistance_Left <= 10) {
+    if(IRDistances_Value.IRDistance_Right <= 20 || IRDistances_Value.IRDistance_Left <= 20) {
 
     	GO = false;
 
-		if(IRDistances_Value.IRDistance_Right <= 10 && IRDistances_Value.IRDistance_Left >= 10) {
+		if(IRDistances_Value.IRDistance_Right <= 20 && IRDistances_Value.IRDistance_Left >= 20) {
+
+			RoverGo(LOWSPEED, FORWARD);
+			/*RoverChangeDirection(LOWSPEED, LEFT);
+			vTaskDelay(500/portTICK_PERIOD_MS);*/
+
+		} else if(IRDistances_Value.IRDistance_Right >= 20 && IRDistances_Value.IRDistance_Left <= 20) {
+
+			RoverGo(LOWSPEED, FORWARD);
+			/*RoverChangeDirection(LOWSPEED, RIGHT);
+			vTaskDelay(500/portTICK_PERIOD_MS);*/
+
+		} else if(IRDistances_Value.IRDistance_Right <= 10 && IRDistances_Value.IRDistance_Left >= 10) {
 
 			RoverChangeDirection(FULLSPEED, LEFT);
+			vTaskDelay(500/portTICK_PERIOD_MS);
 
 		} else if(IRDistances_Value.IRDistance_Right >= 10 && IRDistances_Value.IRDistance_Left <= 10) {
 
 			RoverChangeDirection(FULLSPEED, RIGHT);
+			vTaskDelay(500/portTICK_PERIOD_MS);
 
 		} else if(IRDistances_Value.IRDistance_Right <= 10 && IRDistances_Value.IRDistance_Left <= 10) {
 
-			RoverChangeDirection(FULLSPEED, RIGHT);
+			//RoverChangeDirection(FULLSPEED, RIGHT);
 
+			RoverStop();
+			RoverGo(FULLSPEED, BACKWARD);
+			vTaskDelay(500/portTICK_PERIOD_MS);
+			RoverStop();
+			RoverTurn(LOWSPEED, RIGHT);
+			vTaskDelay(500/portTICK_PERIOD_MS);
+			RoverStop();
 		}
     }
 
@@ -216,11 +240,11 @@ static void MainHandler(void *pvParameters)
 
     if(GO) RoverGo(FULLSPEED, FORWARD);
 
-    char data[28];
+    //char data[28];
     //sprintf(data, "%d_%d_%" PRIu16 "_%" PRIu16 "_%" PRIu16 "_%" PRIu16, Switches_State.Switch_Right, Switches_State.Switch_Left, IRSensors_Value.IRSensor_Right, IRSensors_Value.IRSensor_Left, IRDistances_Value.IRDistance_Right, IRDistances_Value.IRDistance_Left);
-    sprintf(data,"%" PRIu16 "_%" PRIu16, IRSensors_Value.IRSensor_Right, IRSensors_Value.IRSensor_Left);
+    //sprintf(data,"%" PRIu16 "_%" PRIu16, IRSensors_Value.IRSensor_Right, IRSensors_Value.IRSensor_Left);
 
-    traces(data);
+    //traces(data);
   }
 }
 
@@ -241,9 +265,9 @@ static void RoverGo(MOTOR_SPEED speed, GO_DIRECTION direction) {
 
 static void RoverChangeDirection(MOTOR_SPEED speed, TURN_DIRECTION direction) {
   struct MotorsCommand Motors_Speeds;
-  Motors_Speeds.Speed_0 = direction * FULLSPEED;
-  Motors_Speeds.Speed_1 = LOWSPEED;
-  Motors_Speeds.Speed_2 = LOWSPEED;
+  Motors_Speeds.Speed_0 = direction * speed;
+  Motors_Speeds.Speed_1 = LOWSPEED * direction;
+  Motors_Speeds.Speed_2 = LOWSPEED * direction;
   xQueueOverwrite(Motors_Queue, (void*)&Motors_Speeds);
 }
 
@@ -275,15 +299,15 @@ static void Motors(void *pvParameters)
 
   while (1)
   {
-    // Wait for 50ms
-    vTaskDelay(50/portTICK_PERIOD_MS);
+    // Wait for 20ms
+    vTaskDelay(20/portTICK_PERIOD_MS);
     // Get the next instruction from the queue
     Status = xQueueReceive(Motors_Queue, &Motors_Speeds, 100/portTICK_PERIOD_MS);
     // Process it
     if(Status == pdPASS) {
-      motor_set(MOTOR0, Motors_Speeds.Speed_0);
-      motor_set(MOTOR1, Motors_Speeds.Speed_1);
-      motor_set(MOTOR2, Motors_Speeds.Speed_2);
+      if(Motors_Speeds.Speed_0 != NOMODIFY) motor_set(MOTOR0, Motors_Speeds.Speed_0);
+      if(Motors_Speeds.Speed_1 != NOMODIFY) motor_set(MOTOR1, Motors_Speeds.Speed_1);
+      if(Motors_Speeds.Speed_2 != NOMODIFY) motor_set(MOTOR2, Motors_Speeds.Speed_2);
     }
   }
 }
@@ -313,8 +337,8 @@ static void Switches(void *pvParameters)
 
 	while (1) 
 	{
-	  // Wait for 100ms
-	  vTaskDelay(100/portTICK_PERIOD_MS);
+	  // Wait for 50ms
+	  vTaskDelay(50/portTICK_PERIOD_MS);
 	  // Read the pins state into a struct
 	  Switches_State.Switch_Right = digital_get_pin(SWITCH0);
 	  Switches_State.Switch_Left = digital_get_pin(SWITCH1);
@@ -335,15 +359,15 @@ static void IRSensors(void *pvParameters)
 
   while (1)
   {
-    // Wait for 100ms
-    vTaskDelay(100/portTICK_PERIOD_MS);
+    // Wait for 50ms
+    vTaskDelay(50/portTICK_PERIOD_MS);
     // Sample from the first sensor
     ft_start_sampling(IRSENSOR0);
-    while(!ft_is_sampling_finished()) vTaskDelay(50/portTICK_PERIOD_MS); // Wait for 50ms
+    while(!ft_is_sampling_finished()) vTaskDelay(10/portTICK_PERIOD_MS); // Wait for 10ms
     IRSensors_Value.IRSensor_Right = ft_get_transform(DFT_FREQ100);
     // Sample from the second sensor
     ft_start_sampling(IRSENSOR1);
-    while(!ft_is_sampling_finished()) vTaskDelay(50/portTICK_PERIOD_MS); // Wait for 50ms
+    while(!ft_is_sampling_finished()) vTaskDelay(10/portTICK_PERIOD_MS); // Wait for 10ms
     IRSensors_Value.IRSensor_Left = ft_get_transform(DFT_FREQ100);
     // Send the pins state into the queue (overwrite unread values)
     xQueueOverwrite(IRSensors_Queue, (void*)&IRSensors_Value);
@@ -365,8 +389,8 @@ static void IRDistances(void *pvParameters)
     for(uint8_t index = 0; index < 5; index ++) {
       IRDistances_Value.IRDistance_Right += (uint16_t)adc_get_value(IRDISTANCE0);
       IRDistances_Value.IRDistance_Left += (uint16_t)adc_get_value(IRDISTANCE1);
-      // Wait for 20ms
-      vTaskDelay(20/portTICK_PERIOD_MS);
+      // Wait for 10ms
+      vTaskDelay(10/portTICK_PERIOD_MS);
     }
     IRDistances_Value.IRDistance_Right /= 5;
     IRDistances_Value.IRDistance_Left /= 5;

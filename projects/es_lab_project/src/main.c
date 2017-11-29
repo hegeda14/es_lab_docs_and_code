@@ -43,8 +43,8 @@ struct IRDistances {
 };
 
 enum MOTOR_SPEEDS {
-    LOWSPEED = 20,
-    FULLSPEED = 50
+    LOWSPEED = 50,
+    FULLSPEED = 75
 };
 typedef enum MOTOR_SPEEDS MOTOR_SPEED;
 
@@ -145,6 +145,8 @@ static void MainHandler(void *pvParameters)
     // Wait for 50ms
     vTaskDelay(50/portTICK_PERIOD_MS);
 
+    bool GO = true;
+
     xQueueReceive(Switches_Queue, &Switches_State, 0);
     xQueueReceive(IRSensors_Queue, &IRSensors_Value, 0);
     xQueueReceive(IRDistances_Queue, &IRDistances_Value, 0);
@@ -163,7 +165,7 @@ static void MainHandler(void *pvParameters)
     if(Switches_State.Switch_Right == SWITCHON || Switches_State.Switch_Left == SWITCHON) {
       RoverStop();
       RoverGo(FULLSPEED, BACKWARD);
-      vTaskDelay(1000/portTICK_PERIOD_MS);
+      vTaskDelay(500/portTICK_PERIOD_MS);
       RoverStop();
 
       if(Switches_State.Switch_Right == SWITCHON && Switches_State.Switch_Left == SWITCHOFF)
@@ -171,69 +173,53 @@ static void MainHandler(void *pvParameters)
       else
         RoverTurn(LOWSPEED, RIGHT);
 
-      vTaskDelay(1000/portTICK_PERIOD_MS);
+      vTaskDelay(500/portTICK_PERIOD_MS);
       RoverStop();
-
-      while(Switches_State.Switch_Right == SWITCHON || Switches_State.Switch_Left == SWITCHON) {
-        xQueueReceive(Switches_Queue, &Switches_State, 0);
-        if(Switches_State.Switch_Right == SWITCHOFF && Switches_State.Switch_Left == SWITCHOFF) break;
-        // Wait for 50ms
-        vTaskDelay(50/portTICK_PERIOD_MS);
-
-      }
     }
 
 
-    if(IRDistances_Value.IRDistance_Right <= 20 || IRDistances_Value.IRDistance_Left <= 20) {
+    if(IRDistances_Value.IRDistance_Right <= 10 || IRDistances_Value.IRDistance_Left <= 10) {
 
+    	GO = false;
 
-      if(IRDistances_Value.IRDistance_Right <= 20 && IRDistances_Value.IRDistance_Left > 20) {
+		if(IRDistances_Value.IRDistance_Right <= 10 && IRDistances_Value.IRDistance_Left >= 10) {
 
-        /*RoverTurn(LOWSPEED, LEFT);
-        vTaskDelay(1000/portTICK_PERIOD_MS);
-        RoverStop();*/
+			RoverChangeDirection(FULLSPEED, LEFT);
 
-        RoverChangeDirection(FULLSPEED, LEFT);
-      }
-      else if(IRDistances_Value.IRDistance_Right > 20 && IRDistances_Value.IRDistance_Left <= 20) {
+		} else if(IRDistances_Value.IRDistance_Right >= 10 && IRDistances_Value.IRDistance_Left <= 10) {
 
-        /*RoverTurn(LOWSPEED, RIGHT);
-        vTaskDelay(1000/portTICK_PERIOD_MS);
-        RoverStop();*/
+			RoverChangeDirection(FULLSPEED, RIGHT);
 
-        RoverChangeDirection(FULLSPEED, RIGHT);
+		} else if(IRDistances_Value.IRDistance_Right <= 10 && IRDistances_Value.IRDistance_Left <= 10) {
 
-      } else {
+			RoverChangeDirection(FULLSPEED, RIGHT);
 
-        RoverStop();
-
-        RoverGo(FULLSPEED, BACKWARD);
-        vTaskDelay(1000/portTICK_PERIOD_MS);
-        RoverStop();
-        RoverTurn(LOWSPEED, RIGHT);
-        vTaskDelay(1000/portTICK_PERIOD_MS);
-        RoverStop();
-
-      }
+		}
     }
-
-
-    RoverGo(FULLSPEED, FORWARD);
-
 
 
     // Main task -> Keep the target locked
-    // If lost, then search for it!
-    /*if(IRSensors_Value.IRSensor_Right == 0 || IRSensors_Value.IRSensor_Left == 0)
-      RoverTurn(LOWSPEED, RIGHT);
-    else {
-      if(!isRoverStopped()) RoverStop();
-    }*/
+    if(IRSensors_Value.IRSensor_Right != 0 || IRSensors_Value.IRSensor_Left != 0) {
+
+    	GO = false;
+
+		if(IRSensors_Value.IRSensor_Right != 0 && IRSensors_Value.IRSensor_Left == 0) {
+			RoverTurn(LOWSPEED, LEFT);
+
+		} else if(IRSensors_Value.IRSensor_Right == 0 && IRSensors_Value.IRSensor_Left != 0) {
+			RoverTurn(LOWSPEED, RIGHT);
+
+		} else
+			GO = true;
+    }
 
 
+    if(GO) RoverGo(FULLSPEED, FORWARD);
 
     char data[28];
-    sprintf(data, "%d_%d_%" PRIu16 "_%" PRIu16 "_%" PRIu16 "_%" PRIu16, Switches_State.Switch_Right, Switches_State.Switch_Left, IRSensors_Value.IRSensor_Right, IRSensors_Value.IRSensor_Left, IRDistances_Value.IRDistance_Right, IRDistances_Value.IRDistance_Left);
+    //sprintf(data, "%d_%d_%" PRIu16 "_%" PRIu16 "_%" PRIu16 "_%" PRIu16, Switches_State.Switch_Right, Switches_State.Switch_Left, IRSensors_Value.IRSensor_Right, IRSensors_Value.IRSensor_Left, IRDistances_Value.IRDistance_Right, IRDistances_Value.IRDistance_Left);
+    sprintf(data,"%" PRIu16 "_%" PRIu16, IRSensors_Value.IRSensor_Right, IRSensors_Value.IRSensor_Left);
+
     traces(data);
   }
 }
@@ -275,8 +261,8 @@ static void RoverStop() {
   Motors_Speeds.Speed_1 = 0;
   Motors_Speeds.Speed_2 = 0;
   xQueueOverwrite(Motors_Queue, (void*)&Motors_Speeds);
-  // Default 500ms delay after stop
-  vTaskDelay(500/portTICK_PERIOD_MS);
+  // Default 250ms delay after stop
+  vTaskDelay(250/portTICK_PERIOD_MS);
 }
 
 static void Motors(void *pvParameters)

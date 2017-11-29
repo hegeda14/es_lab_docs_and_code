@@ -43,7 +43,6 @@ struct IRDistances {
 };
 
 enum MOTOR_SPEEDS {
-	NOMODIFY = -1,
     LOWSPEED = 50,
     FULLSPEED = 75
 };
@@ -91,9 +90,10 @@ static void IRSensors(void *pvParameters);
 static void IRDistances(void *pvParameters);
 // Actuators
 static void Motors(void *pvParameters);
+static void Monitoring(void *pvParameters);
 // Auxiliary
 static void RoverGo(MOTOR_SPEED, GO_DIRECTION);
-static void RoverTurn(MOTOR_SPEED, TURN_DIRECTION);
+static void RoverTurn(MOTOR_SPEED, TURN_DIRECTION, int);
 static void RoverStop();
 static void RoverChangeDirection(MOTOR_SPEED, TURN_DIRECTION);
 
@@ -103,12 +103,14 @@ int main()
 {
     dorobo_init();			//Call dorobo_init() function to initialize HAL, Clocks, Timers etc.	
     wifi_init();
+    int8_t monitoring = 0;
 
-    if(xTaskCreate(Motors, "MOTORS", 64, NULL, 2, NULL) == errCOULD_NOT_ALLOCATE_REQUIRED_MEMORY) traces("MOTORS ERROR");
+    if(xTaskCreate(Motors, "MOTORS", 64, (void*)&monitoring, 2, NULL) == errCOULD_NOT_ALLOCATE_REQUIRED_MEMORY) traces("MOTORS ERROR");
     if(xTaskCreate(Switches, "SWITCHES", 64, NULL, 2, NULL) == errCOULD_NOT_ALLOCATE_REQUIRED_MEMORY) traces("SWITCHES ERROR");
     if(xTaskCreate(IRSensors, "IRSENSORS", 64, NULL, 2, NULL) == errCOULD_NOT_ALLOCATE_REQUIRED_MEMORY) traces("IRSENSORS ERROR");
     if(xTaskCreate(IRDistances, "IRDISTANCES", 64, NULL, 2, NULL) == errCOULD_NOT_ALLOCATE_REQUIRED_MEMORY) traces("IRDISTANCES ERROR");
     if(xTaskCreate(MainHandler, "MAINHANDLER", 256, NULL, 2, NULL) == errCOULD_NOT_ALLOCATE_REQUIRED_MEMORY) traces("MAINHANDLER ERROR");
+    if(xTaskCreate(Monitoring, "MONITOR", 32, (void*)&monitoring, 1, NULL) == errCOULD_NOT_ALLOCATE_REQUIRED_MEMORY) traces("MONITORING ERROR");
     if(xTaskCreate(StatusLED, "STATUSLED", 32, NULL, 1, NULL) == errCOULD_NOT_ALLOCATE_REQUIRED_MEMORY) traces("STATUSLED ERROR");
 
     Switches_Queue = xQueueCreate(1, sizeof(struct Switches*));
@@ -172,51 +174,33 @@ static void MainHandler(void *pvParameters)
       RoverStop();
 
       if(Switches_State.Switch_Right == SWITCHON && Switches_State.Switch_Left == SWITCHOFF)
-        RoverTurn(LOWSPEED, LEFT);
+        RoverTurn(LOWSPEED, LEFT, 60);
       else
-        RoverTurn(LOWSPEED, RIGHT);
+        RoverTurn(LOWSPEED, RIGHT, 60);
 
-      vTaskDelay(500/portTICK_PERIOD_MS);
       RoverStop();
     }
 
 
-    if(IRDistances_Value.IRDistance_Right <= 20 || IRDistances_Value.IRDistance_Left <= 20) {
+    if(IRDistances_Value.IRDistance_Right <= 10 || IRDistances_Value.IRDistance_Left <= 10) {
 
     	GO = false;
 
-		if(IRDistances_Value.IRDistance_Right <= 20 && IRDistances_Value.IRDistance_Left >= 20) {
+    	if(IRDistances_Value.IRDistance_Right <= 10 && IRDistances_Value.IRDistance_Left > 10) {
 
-			RoverGo(LOWSPEED, FORWARD);
-			/*RoverChangeDirection(LOWSPEED, LEFT);
-			vTaskDelay(500/portTICK_PERIOD_MS);*/
+    		RoverChangeDirection(FULLSPEED, LEFT);
 
-		} else if(IRDistances_Value.IRDistance_Right >= 20 && IRDistances_Value.IRDistance_Left <= 20) {
-
-			RoverGo(LOWSPEED, FORWARD);
-			/*RoverChangeDirection(LOWSPEED, RIGHT);
-			vTaskDelay(500/portTICK_PERIOD_MS);*/
-
-		} else if(IRDistances_Value.IRDistance_Right <= 10 && IRDistances_Value.IRDistance_Left >= 10) {
-
-			RoverChangeDirection(FULLSPEED, LEFT);
-			vTaskDelay(500/portTICK_PERIOD_MS);
-
-		} else if(IRDistances_Value.IRDistance_Right >= 10 && IRDistances_Value.IRDistance_Left <= 10) {
+		} else if(IRDistances_Value.IRDistance_Left <= 10 && IRDistances_Value.IRDistance_Right > 10) {
 
 			RoverChangeDirection(FULLSPEED, RIGHT);
-			vTaskDelay(500/portTICK_PERIOD_MS);
 
 		} else if(IRDistances_Value.IRDistance_Right <= 10 && IRDistances_Value.IRDistance_Left <= 10) {
-
-			//RoverChangeDirection(FULLSPEED, RIGHT);
 
 			RoverStop();
 			RoverGo(FULLSPEED, BACKWARD);
 			vTaskDelay(500/portTICK_PERIOD_MS);
 			RoverStop();
-			RoverTurn(LOWSPEED, RIGHT);
-			vTaskDelay(500/portTICK_PERIOD_MS);
+			RoverTurn(LOWSPEED, RIGHT, 60);
 			RoverStop();
 		}
     }
@@ -228,10 +212,10 @@ static void MainHandler(void *pvParameters)
     	GO = false;
 
 		if(IRSensors_Value.IRSensor_Right != 0 && IRSensors_Value.IRSensor_Left == 0) {
-			RoverTurn(LOWSPEED, LEFT);
+			RoverTurn(LOWSPEED, LEFT, 0);
 
 		} else if(IRSensors_Value.IRSensor_Right == 0 && IRSensors_Value.IRSensor_Left != 0) {
-			RoverTurn(LOWSPEED, RIGHT);
+			RoverTurn(LOWSPEED, RIGHT, 0);
 
 		} else
 			GO = true;
@@ -266,17 +250,27 @@ static void RoverGo(MOTOR_SPEED speed, GO_DIRECTION direction) {
 static void RoverChangeDirection(MOTOR_SPEED speed, TURN_DIRECTION direction) {
   struct MotorsCommand Motors_Speeds;
   Motors_Speeds.Speed_0 = direction * speed;
-  Motors_Speeds.Speed_1 = LOWSPEED * direction;
-  Motors_Speeds.Speed_2 = LOWSPEED * direction;
+  if(direction == RIGHT) {
+	  Motors_Speeds.Speed_1 = 0;
+	  Motors_Speeds.Speed_2 = LOWSPEED * direction;
+  } else {
+	  Motors_Speeds.Speed_1 = LOWSPEED * direction;
+	  Motors_Speeds.Speed_2 = 0;
+  }
+
   xQueueOverwrite(Motors_Queue, (void*)&Motors_Speeds);
 }
 
-static void RoverTurn(MOTOR_SPEED speed, TURN_DIRECTION direction) {
+static void RoverTurn(MOTOR_SPEED speed, TURN_DIRECTION direction, int angle) {
+
   struct MotorsCommand Motors_Speeds;
   Motors_Speeds.Speed_0 = speed * direction;
   Motors_Speeds.Speed_1 = speed * direction;
   Motors_Speeds.Speed_2 = speed * direction;
   xQueueOverwrite(Motors_Queue, (void*)&Motors_Speeds);
+
+  float turn_time = ((((float)2920/(float)360)*(float)angle)/(float)speed*(float)LOWSPEED);
+  vTaskDelay(turn_time/portTICK_PERIOD_MS);
 }
 
 static void RoverStop() {
@@ -289,7 +283,7 @@ static void RoverStop() {
   vTaskDelay(250/portTICK_PERIOD_MS);
 }
 
-static void Motors(void *pvParameters)
+static void Motors(void *monitoring)
 {
   trace_init();
   motor_init();
@@ -305,13 +299,39 @@ static void Motors(void *pvParameters)
     Status = xQueueReceive(Motors_Queue, &Motors_Speeds, 100/portTICK_PERIOD_MS);
     // Process it
     if(Status == pdPASS) {
-      if(Motors_Speeds.Speed_0 != NOMODIFY) motor_set(MOTOR0, Motors_Speeds.Speed_0);
-      if(Motors_Speeds.Speed_1 != NOMODIFY) motor_set(MOTOR1, Motors_Speeds.Speed_1);
-      if(Motors_Speeds.Speed_2 != NOMODIFY) motor_set(MOTOR2, Motors_Speeds.Speed_2);
+
+      if(motor_get_speed(MOTOR0) != Motors_Speeds.Speed_0 ||
+		 motor_get_speed(MOTOR1) != Motors_Speeds.Speed_1 ||
+		 motor_get_speed(MOTOR2) != Motors_Speeds.Speed_2) {
+
+		  motor_set(MOTOR0, Motors_Speeds.Speed_0);
+		  motor_set(MOTOR1, Motors_Speeds.Speed_1);
+		  motor_set(MOTOR2, Motors_Speeds.Speed_2);
+
+		  *((int8_t*)monitoring) ++;
+      }
     }
   }
 }
 
+static void Monitoring(void *monitoring)
+{
+  trace_init();
+
+  while (1)
+  {
+    // Wait for 500ms
+    vTaskDelay(1000/portTICK_PERIOD_MS);
+
+    if(*(int8_t*)monitoring >= 5) {
+		RoverStop();
+		RoverTurn(LOWSPEED, RIGHT, 180);
+		RoverStop();
+    }
+
+    *(int8_t*)monitoring = 0;
+  }
+}
 
 static void StatusLED(void *pvParameters)
 {

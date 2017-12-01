@@ -75,7 +75,7 @@ enum COMMANDS {
 typedef enum COMMANDS COMMAND;
 
 struct SuperVise {
-  COMMAND Command;
+	int8_t Command;
 };
 
 static const uint16_t IRDistancesLookupTable[6][2] = {
@@ -97,7 +97,6 @@ QueueHandle_t SuperVisor_Queue;
 QueueHandle_t SuperVisor_Motors_Queue;
 
 // Main functions
-static void StatusLED(void *pvParameters);
 static void MainHandler(void *pvParameters);
 static void SuperVisor(void *pvParameters);
 // Sensors
@@ -124,17 +123,16 @@ int main()
     if(xTaskCreate(IRSensors, "IRSENSORS", 64, NULL, 2, NULL) == errCOULD_NOT_ALLOCATE_REQUIRED_MEMORY) traces("IRSENSORS ERROR");
     if(xTaskCreate(IRDistances, "IRDISTANCES", 64, NULL, 2, NULL) == errCOULD_NOT_ALLOCATE_REQUIRED_MEMORY) traces("IRDISTANCES ERROR");
     if(xTaskCreate(MainHandler, "MAINHANDLER", 256, NULL, 2, NULL) == errCOULD_NOT_ALLOCATE_REQUIRED_MEMORY) traces("MAINHANDLER ERROR");
-    if(xTaskCreate(SuperVisor, "SUPERVISOR", 64, NULL, 1, NULL) == errCOULD_NOT_ALLOCATE_REQUIRED_MEMORY) traces("SUPERVISOR ERROR");
-    if(xTaskCreate(StatusLED, "STATUSLED", 32, NULL, 1, NULL) == errCOULD_NOT_ALLOCATE_REQUIRED_MEMORY) traces("STATUSLED ERROR");
+    if(xTaskCreate(SuperVisor, "SUPERVISOR", 32, NULL, 2, NULL) == errCOULD_NOT_ALLOCATE_REQUIRED_MEMORY) traces("SUPERVISOR ERROR");
 
     Switches_Queue = xQueueCreate(1, sizeof(struct Switches*));
     IRSensors_Queue = xQueueCreate(1, sizeof(struct IRSensors*));
     IRDistances_Queue = xQueueCreate(1, sizeof(struct IRDistances*));
 
-    Motors_Queue = xQueueCreate(1, sizeof(struct Motors*));
+    Motors_Queue = xQueueCreate(1, sizeof(struct MotorsCommand*));
 
-    SuperVisor_Queue = xQueueCreate(1, sizeof(struct SuperVisor*));
-    SuperVisor_Motors_Queue = xQueueCreate(5, sizeof(struct Motors*));
+    SuperVisor_Queue = xQueueCreate(1, sizeof(struct SuperVise*));
+    SuperVisor_Motors_Queue = xQueueCreate(5, sizeof(struct MotorsCommand*));
 
     vTaskStartScheduler();	//start the freertos scheduler
 
@@ -147,7 +145,7 @@ static void MainHandler(void *pvParameters)
   struct IRSensors IRSensors_Value;
   struct IRDistances IRDistances_Value;
 
-  struct SuperVisor SuperVisor_Commands;
+  struct SuperVise SuperVisor_Commands;
 
   portBASE_TYPE Status;
 
@@ -176,16 +174,23 @@ static void MainHandler(void *pvParameters)
     xQueueReceive(IRSensors_Queue, &IRSensors_Value, 0);
     xQueueReceive(IRDistances_Queue, &IRDistances_Value, 0);
 
-    Status = xQueueReceive(SuperVisor_Queue, &SuperVisor_Command, 0);
-    
-    if(Status == pdPASS) { 
+    Status = xQueueReceive(SuperVisor_Queue, &SuperVisor_Commands, 0);
+
+    if(Status == pdPASS) {
       switch(SuperVisor_Commands.Command) {
         case RETREAT: {
-          RoverStop();
-          RoverTurn(LOWSPEED, LEFT, 180);
-          RoverStop();
+        	traces("RETREAT");
+        	RoverTurn(LOWSPEED, RIGHT, 120);
         } break;
-        case SCAN: break;
+        case SCAN: {
+        	/*RoverTurn(LOWSPEED, LEFT, 30);
+        	xQueueReceive(IRSensors_Queue, &IRSensors_Value, 0);
+        	if(IRSensors_Value.IRSensor_Right != 0 || IRSensors_Value.IRSensor_Left != 0) break;
+        	RoverTurn(LOWSPEED, RIGHT, 60);
+        	xQueueReceive(IRSensors_Queue, &IRSensors_Value, 0);
+        	if(IRSensors_Value.IRSensor_Right != 0 || IRSensors_Value.IRSensor_Left != 0) break;
+        	RoverTurn(LOWSPEED, LEFT, 30);*/
+        } break;
       }
     }
 
@@ -303,7 +308,7 @@ static void RoverTurn(MOTOR_SPEED speed, TURN_DIRECTION direction, ANGLE angle) 
   Motors_Speeds.Speed_2 = speed * direction;
   xQueueOverwrite(Motors_Queue, (void*)&Motors_Speeds);
 
-  float turn_time = ((((float)2920/(float)360)*(float)angle)/(float)speed*(float)LOWSPEED);
+  int16_t turn_time = ((((2920/360)*angle)/speed)*LOWSPEED);
   vTaskDelay(turn_time/portTICK_PERIOD_MS);
 }
 
@@ -335,14 +340,14 @@ static void Motors(void *pvParameters)
     if(Status == pdPASS) {
 
       if( motor_get_speed(MOTOR0) != Motors_Speeds.Speed_0 ||
-		      motor_get_speed(MOTOR1) != Motors_Speeds.Speed_1 ||
-		      motor_get_speed(MOTOR2) != Motors_Speeds.Speed_2) {
+		  motor_get_speed(MOTOR1) != Motors_Speeds.Speed_1 ||
+		  motor_get_speed(MOTOR2) != Motors_Speeds.Speed_2) {
 
 		    motor_set(MOTOR0, Motors_Speeds.Speed_0);
 		    motor_set(MOTOR1, Motors_Speeds.Speed_1);
 		    motor_set(MOTOR2, Motors_Speeds.Speed_2);
 
-        xQueueSend(SuperVisor_Motors_Queue, (void*)&Motors_Speeds);
+        xQueueSend(SuperVisor_Motors_Queue, (void*)&Motors_Speeds, 0);
       }
     }
   }
@@ -351,33 +356,31 @@ static void Motors(void *pvParameters)
 static void SuperVisor(void *pvParameters)
 {
   trace_init();
+  struct SuperVise SuperVisor_Commands;
+  int8_t Scanning = 0;
 
   while (1)
   {
-    // Wait for 1000ms
-    vTaskDelay(1000/portTICK_PERIOD_MS);
+	vTaskDelay(1000/portTICK_PERIOD_MS);
+	led_green_toggle();
 
     if(uxQueueSpacesAvailable(SuperVisor_Motors_Queue) == 0) {
-      struct SuperVisor SuperVisor_Commands;
-      SuperVisor_Commands.Command = RETREAT;
-      xQueueSend(SuperVisor_Queue, (void*)&SuperVisor_Commands);
+
+    	SuperVisor_Commands.Command = RETREAT;
+    	xQueueOverwrite(SuperVisor_Queue, (void*)&SuperVisor_Commands);
+
     }
 
     xQueueReset(SuperVisor_Motors_Queue);
 
-  }
-}
+    /*if(Scanning == 30) {
+    	Scanning = 0;
 
-static void StatusLED(void *pvParameters)
-{
-  trace_init();
+    	SuperVisor_Commands.Command = SCAN;
+    	xQueueSend(SuperVisor_Queue, (void*)&SuperVisor_Commands, 0);
+    }*/
 
-  while (1)
-  {
-    // Shows, that the board is still operating
-    // Wait for 500ms (1 second)
-    vTaskDelay(500/portTICK_PERIOD_MS);
-    led_green_toggle();
+    //Scanning ++;
   }
 }
 

@@ -226,13 +226,9 @@ static void MainHandler(void *pvParameters)
     	GO = false;
 
     	if(IRDistances_Value.IRDistance_Right <= 10 && IRDistances_Value.IRDistance_Left > 10) {
-
     		RoverChangeDirection(FULLSPEED, LEFT);
-
 		} else if(IRDistances_Value.IRDistance_Left <= 10 && IRDistances_Value.IRDistance_Right > 10) {
-
 			RoverChangeDirection(FULLSPEED, RIGHT);
-
 		} else if(IRDistances_Value.IRDistance_Right <= 10 && IRDistances_Value.IRDistance_Left <= 10) {
 
 			RoverStop();
@@ -242,8 +238,8 @@ static void MainHandler(void *pvParameters)
 			RoverTurn(LOWSPEED, RIGHT, 60);
 			RoverStop();
 		}
-    }
 
+  }
 
     // Main task -> Keep the target locked
     if(IRSensors_Value.IRSensor_Right != 0 || IRSensors_Value.IRSensor_Left != 0) {
@@ -251,11 +247,9 @@ static void MainHandler(void *pvParameters)
     	GO = false;
 
 		if(IRSensors_Value.IRSensor_Right != 0 && IRSensors_Value.IRSensor_Left == 0) {
-			RoverTurn(LOWSPEED, LEFT, 0);
-
+			RoverChangeDirection(FULLSPEED, RIGHT);
 		} else if(IRSensors_Value.IRSensor_Right == 0 && IRSensors_Value.IRSensor_Left != 0) {
-			RoverTurn(LOWSPEED, RIGHT, 0);
-
+			RoverChangeDirection(FULLSPEED, LEFT);
 		} else
 			GO = true;
     }
@@ -288,12 +282,12 @@ static void RoverGo(MOTOR_SPEED speed, GO_DIRECTION direction) {
 
 static void RoverChangeDirection(MOTOR_SPEED speed, TURN_DIRECTION direction) {
   struct MotorsCommand Motors_Speeds;
-  Motors_Speeds.Speed_0 = direction * speed;
+  Motors_Speeds.Speed_0 = speed * direction;
   if(direction == RIGHT) {
 	  Motors_Speeds.Speed_1 = 0;
-	  Motors_Speeds.Speed_2 = LOWSPEED * direction;
+	  Motors_Speeds.Speed_2 = speed * direction;
   } else {
-	  Motors_Speeds.Speed_1 = LOWSPEED * direction;
+	  Motors_Speeds.Speed_1 = speed * direction;
 	  Motors_Speeds.Speed_2 = 0;
   }
 
@@ -308,8 +302,10 @@ static void RoverTurn(MOTOR_SPEED speed, TURN_DIRECTION direction, ANGLE angle) 
   Motors_Speeds.Speed_2 = speed * direction;
   xQueueOverwrite(Motors_Queue, (void*)&Motors_Speeds);
 
-  int16_t turn_time = ((((2920/360)*angle)/speed)*LOWSPEED);
-  vTaskDelay(turn_time/portTICK_PERIOD_MS);
+  if(angle != 0) {
+	  int16_t turn_time = ((((2920/360)*angle)/speed)*LOWSPEED);
+	  vTaskDelay(turn_time/portTICK_PERIOD_MS);
+  }
 }
 
 static void RoverStop() {
@@ -373,14 +369,14 @@ static void SuperVisor(void *pvParameters)
 
     xQueueReset(SuperVisor_Motors_Queue);
 
-    /*if(Scanning == 30) {
+    if(Scanning == 30) {
     	Scanning = 0;
 
     	SuperVisor_Commands.Command = SCAN;
     	xQueueSend(SuperVisor_Queue, (void*)&SuperVisor_Commands, 0);
-    }*/
+    }
 
-    //Scanning ++;
+    Scanning ++;
   }
 }
 

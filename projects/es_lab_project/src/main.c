@@ -60,10 +60,22 @@ enum TURN_DIRECTIONS {
 };
 typedef enum TURN_DIRECTIONS TURN_DIRECTION;
 
+typedef int8_t ANGLE;
+
 struct MotorsCommand {
   int8_t Speed_0;
   int8_t Speed_1;
   int8_t Speed_2;
+};
+
+enum COMMANDS {
+    RETREAT = 1,
+    SCAN = 2
+};
+typedef enum COMMANDS COMMAND;
+
+struct SuperVise {
+  COMMAND Command;
 };
 
 static const uint16_t IRDistancesLookupTable[6][2] = {
@@ -81,19 +93,22 @@ QueueHandle_t IRDistances_Queue;
 
 QueueHandle_t Motors_Queue;
 
+QueueHandle_t SuperVisor_Queue;
+QueueHandle_t SuperVisor_Motors_Queue;
+
 // Main functions
 static void StatusLED(void *pvParameters);
 static void MainHandler(void *pvParameters);
+static void SuperVisor(void *pvParameters);
 // Sensors
 static void Switches(void *pvParameters);
 static void IRSensors(void *pvParameters);
 static void IRDistances(void *pvParameters);
 // Actuators
 static void Motors(void *pvParameters);
-static void Monitoring(void *pvParameters);
 // Auxiliary
 static void RoverGo(MOTOR_SPEED, GO_DIRECTION);
-static void RoverTurn(MOTOR_SPEED, TURN_DIRECTION, int);
+static void RoverTurn(MOTOR_SPEED, TURN_DIRECTION, ANGLE);
 static void RoverStop();
 static void RoverChangeDirection(MOTOR_SPEED, TURN_DIRECTION);
 
@@ -103,14 +118,13 @@ int main()
 {
     dorobo_init();			//Call dorobo_init() function to initialize HAL, Clocks, Timers etc.	
     wifi_init();
-    int8_t monitoring = 0;
 
-    if(xTaskCreate(Motors, "MOTORS", 64, (void*)&monitoring, 2, NULL) == errCOULD_NOT_ALLOCATE_REQUIRED_MEMORY) traces("MOTORS ERROR");
+    if(xTaskCreate(Motors, "MOTORS", 64, NULL, 2, NULL) == errCOULD_NOT_ALLOCATE_REQUIRED_MEMORY) traces("MOTORS ERROR");
     if(xTaskCreate(Switches, "SWITCHES", 64, NULL, 2, NULL) == errCOULD_NOT_ALLOCATE_REQUIRED_MEMORY) traces("SWITCHES ERROR");
     if(xTaskCreate(IRSensors, "IRSENSORS", 64, NULL, 2, NULL) == errCOULD_NOT_ALLOCATE_REQUIRED_MEMORY) traces("IRSENSORS ERROR");
     if(xTaskCreate(IRDistances, "IRDISTANCES", 64, NULL, 2, NULL) == errCOULD_NOT_ALLOCATE_REQUIRED_MEMORY) traces("IRDISTANCES ERROR");
     if(xTaskCreate(MainHandler, "MAINHANDLER", 256, NULL, 2, NULL) == errCOULD_NOT_ALLOCATE_REQUIRED_MEMORY) traces("MAINHANDLER ERROR");
-    if(xTaskCreate(Monitoring, "MONITOR", 32, (void*)&monitoring, 1, NULL) == errCOULD_NOT_ALLOCATE_REQUIRED_MEMORY) traces("MONITORING ERROR");
+    if(xTaskCreate(SuperVisor, "SUPERVISOR", 64, NULL, 1, NULL) == errCOULD_NOT_ALLOCATE_REQUIRED_MEMORY) traces("SUPERVISOR ERROR");
     if(xTaskCreate(StatusLED, "STATUSLED", 32, NULL, 1, NULL) == errCOULD_NOT_ALLOCATE_REQUIRED_MEMORY) traces("STATUSLED ERROR");
 
     Switches_Queue = xQueueCreate(1, sizeof(struct Switches*));
@@ -118,6 +132,9 @@ int main()
     IRDistances_Queue = xQueueCreate(1, sizeof(struct IRDistances*));
 
     Motors_Queue = xQueueCreate(1, sizeof(struct Motors*));
+
+    SuperVisor_Queue = xQueueCreate(1, sizeof(struct SuperVisor*));
+    SuperVisor_Motors_Queue = xQueueCreate(5, sizeof(struct Motors*));
 
     vTaskStartScheduler();	//start the freertos scheduler
 
@@ -129,6 +146,10 @@ static void MainHandler(void *pvParameters)
   struct Switches Switches_State;
   struct IRSensors IRSensors_Value;
   struct IRDistances IRDistances_Value;
+
+  struct SuperVisor SuperVisor_Commands;
+
+  portBASE_TYPE Status;
 
   // Wait for 1 second
   vTaskDelay(1000/portTICK_PERIOD_MS);
@@ -154,6 +175,19 @@ static void MainHandler(void *pvParameters)
     xQueueReceive(Switches_Queue, &Switches_State, 0);
     xQueueReceive(IRSensors_Queue, &IRSensors_Value, 0);
     xQueueReceive(IRDistances_Queue, &IRDistances_Value, 0);
+
+    Status = xQueueReceive(SuperVisor_Queue, &SuperVisor_Command, 0);
+    
+    if(Status == pdPASS) { 
+      switch(SuperVisor_Commands.Command) {
+        case RETREAT: {
+          RoverStop();
+          RoverTurn(LOWSPEED, LEFT, 180);
+          RoverStop();
+        } break;
+        case SCAN: break;
+      }
+    }
 
     // What we should do;
     // 1. Turn, until all of the IRSensors receiving
@@ -261,7 +295,7 @@ static void RoverChangeDirection(MOTOR_SPEED speed, TURN_DIRECTION direction) {
   xQueueOverwrite(Motors_Queue, (void*)&Motors_Speeds);
 }
 
-static void RoverTurn(MOTOR_SPEED speed, TURN_DIRECTION direction, int angle) {
+static void RoverTurn(MOTOR_SPEED speed, TURN_DIRECTION direction, ANGLE angle) {
 
   struct MotorsCommand Motors_Speeds;
   Motors_Speeds.Speed_0 = speed * direction;
@@ -283,7 +317,7 @@ static void RoverStop() {
   vTaskDelay(250/portTICK_PERIOD_MS);
 }
 
-static void Motors(void *monitoring)
+static void Motors(void *pvParameters)
 {
   trace_init();
   motor_init();
@@ -300,36 +334,37 @@ static void Motors(void *monitoring)
     // Process it
     if(Status == pdPASS) {
 
-      if(motor_get_speed(MOTOR0) != Motors_Speeds.Speed_0 ||
-		 motor_get_speed(MOTOR1) != Motors_Speeds.Speed_1 ||
-		 motor_get_speed(MOTOR2) != Motors_Speeds.Speed_2) {
+      if( motor_get_speed(MOTOR0) != Motors_Speeds.Speed_0 ||
+		      motor_get_speed(MOTOR1) != Motors_Speeds.Speed_1 ||
+		      motor_get_speed(MOTOR2) != Motors_Speeds.Speed_2) {
 
-		  motor_set(MOTOR0, Motors_Speeds.Speed_0);
-		  motor_set(MOTOR1, Motors_Speeds.Speed_1);
-		  motor_set(MOTOR2, Motors_Speeds.Speed_2);
+		    motor_set(MOTOR0, Motors_Speeds.Speed_0);
+		    motor_set(MOTOR1, Motors_Speeds.Speed_1);
+		    motor_set(MOTOR2, Motors_Speeds.Speed_2);
 
-		  *((int8_t*)monitoring) ++;
+        xQueueSend(SuperVisor_Motors_Queue, (void*)&Motors_Speeds);
       }
     }
   }
 }
 
-static void Monitoring(void *monitoring)
+static void SuperVisor(void *pvParameters)
 {
   trace_init();
 
   while (1)
   {
-    // Wait for 500ms
+    // Wait for 1000ms
     vTaskDelay(1000/portTICK_PERIOD_MS);
 
-    if(*(int8_t*)monitoring >= 5) {
-		RoverStop();
-		RoverTurn(LOWSPEED, RIGHT, 180);
-		RoverStop();
+    if(uxQueueSpacesAvailable(SuperVisor_Motors_Queue) == 0) {
+      struct SuperVisor SuperVisor_Commands;
+      SuperVisor_Commands.Command = RETREAT;
+      xQueueSend(SuperVisor_Queue, (void*)&SuperVisor_Commands);
     }
 
-    *(int8_t*)monitoring = 0;
+    xQueueReset(SuperVisor_Motors_Queue);
+
   }
 }
 

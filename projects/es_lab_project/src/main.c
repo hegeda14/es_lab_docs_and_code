@@ -107,7 +107,7 @@ static void IRDistances(void *pvParameters);
 static void Motors(void *pvParameters);
 // Auxiliary
 static void RoverGo(MOTOR_SPEED, GO_DIRECTION);
-static void RoverTurn(MOTOR_SPEED, TURN_DIRECTION, ANGLE);
+static ANGLE RoverTurn(MOTOR_SPEED, TURN_DIRECTION, ANGLE);
 static void RoverStop();
 static void RoverChangeDirection(MOTOR_SPEED, TURN_DIRECTION);
 
@@ -148,8 +148,8 @@ static void MainHandler(void *pvParameters)
   struct SuperVise SuperVisor_Commands;
 
   portBASE_TYPE Status;
-  TURN_DIRECTION TurnDirection = RIGHT;
   int8_t RoverTurned = 0;
+  int16_t CurrentAngle = 0;
   bool ScanningAllowed = true;
 
   // Wait for 1 second
@@ -168,7 +168,7 @@ static void MainHandler(void *pvParameters)
       // Wait for 2 second
       vTaskDelay(2000/portTICK_PERIOD_MS);
       /*RoverStop();
-      RoverTurn(FULLSPEED, RIGHT, 30);
+      RoverTurn(LOWSPEED, RIGHT, 120);
       RoverStop();
       vTaskDelay(10000/portTICK_PERIOD_MS);*/
     }
@@ -187,11 +187,16 @@ static void MainHandler(void *pvParameters)
       switch(SuperVisor_Commands.Command) {
         case RETREAT: {
         	traces("RETREAT");
-        	RoverTurn(LOWSPEED, RIGHT, 120);
+        	CurrentAngle += RoverTurn(LOWSPEED, RIGHT, 120);
         } break;
         case SCAN: {
         	traces("SCAN");
         	ScanningAllowed = true;
+    		char data[28];
+    		//sprintf(data, "%d_%d_%" PRIu16 "_%" PRIu16 "_%" PRIu16 "_%" PRIu16, Switches_State.Switch_Right, Switches_State.Switch_Left, IRSensors_Value.IRSensor_Right, IRSensors_Value.IRSensor_Left, IRDistances_Value.IRDistance_Right, IRDistances_Value.IRDistance_Left);
+    		sprintf(data,"%i", CurrentAngle);
+
+    		traces(data);
         } break;
       }
     }
@@ -211,15 +216,15 @@ static void MainHandler(void *pvParameters)
     if(Switches_State.Switch_Right == SWITCHON || Switches_State.Switch_Left == SWITCHON) {
       RoverStop();
       RoverGo(FULLSPEED, BACKWARD);
-      vTaskDelay(500/portTICK_PERIOD_MS);
+      vTaskDelay(250/portTICK_PERIOD_MS);
       RoverStop();
 
       if(Switches_State.Switch_Right == SWITCHON && Switches_State.Switch_Left == SWITCHOFF) {
-    	  RoverTurn(LOWSPEED, LEFT, 60);
-    	  TurnDirection = RIGHT;
+    	  CurrentAngle += RoverTurn(LOWSPEED, LEFT, 60);
+      } else if (Switches_State.Switch_Right == SWITCHOFF && Switches_State.Switch_Left == SWITCHON) {
+    	  CurrentAngle += RoverTurn(LOWSPEED, RIGHT, 60);
       } else {
-    	  RoverTurn(LOWSPEED, RIGHT, 60);
-    	  TurnDirection = LEFT;
+    	  CurrentAngle += RoverTurn(LOWSPEED, CurrentAngle > 0 ? LEFT : RIGHT, 90);
       }
 
       RoverStop();
@@ -231,22 +236,20 @@ static void MainHandler(void *pvParameters)
     	GO = false;
 
     	if(IRDistances_Value.IRDistance_Right <= 10 && IRDistances_Value.IRDistance_Left > 10) {
-    		RoverChangeDirection(FULLSPEED, LEFT);
-    		TurnDirection = RIGHT;
+    		//RoverChangeDirection(FULLSPEED, LEFT);
+    		CurrentAngle += RoverTurn(FULLSPEED, LEFT, 30);
 		} else if(IRDistances_Value.IRDistance_Left <= 10 && IRDistances_Value.IRDistance_Right > 10) {
-			RoverChangeDirection(FULLSPEED, RIGHT);
-			TurnDirection = LEFT;
+			//RoverChangeDirection(FULLSPEED, RIGHT);
+			CurrentAngle += RoverTurn(FULLSPEED, RIGHT, 30);
 		} else if(IRDistances_Value.IRDistance_Right <= 10 && IRDistances_Value.IRDistance_Left <= 10) {
-			RoverTurn(LOWSPEED, TurnDirection, 90);
+			CurrentAngle += RoverTurn(LOWSPEED, CurrentAngle > 0 ? LEFT : RIGHT, 90);
+
 			RoverTurned ++;
 			if(RoverTurned >= 2 ) {
-				RoverTurn(LOWSPEED, TurnDirection, 90);
-			} else if (RoverTurned >= 3 ) {
-				RoverTurn(LOWSPEED, TurnDirection, 120);
+				CurrentAngle += RoverTurn(LOWSPEED, CurrentAngle > 0 ? RIGHT : LEFT, 90);
 			}
+
 			RoverStop();
-			if(TurnDirection == RIGHT) TurnDirection = LEFT;
-			else TurnDirection = RIGHT;
 		}
 	}
 
@@ -257,19 +260,22 @@ static void MainHandler(void *pvParameters)
 
 		if(IRSensors_Value.IRSensor_Right != 0 && IRSensors_Value.IRSensor_Left == 0) {
 			//RoverChangeDirection(FULLSPEED, RIGHT);
-			RoverTurn(FULLSPEED, RIGHT, 30);
+			CurrentAngle += RoverTurn(FULLSPEED, RIGHT, 30);
 			RoverStop();
 		} else if(IRSensors_Value.IRSensor_Right == 0 && IRSensors_Value.IRSensor_Left != 0) {
 			//RoverChangeDirection(FULLSPEED, LEFT);
-			RoverTurn(FULLSPEED, LEFT, 30);
+			CurrentAngle += RoverTurn(FULLSPEED, LEFT, 30);
 			RoverStop();
 		} else {
 			GO = true;
 		}
 
 		ScanningAllowed = false;
+
     }
 
+    if(CurrentAngle > 120 || CurrentAngle < -120)
+    	CurrentAngle += RoverTurn(FULLSPEED, LEFT, CurrentAngle);
 
     if(GO) {
     	RoverTurned = 0;
@@ -278,7 +284,7 @@ static void MainHandler(void *pvParameters)
 
     //char data[28];
     //sprintf(data, "%d_%d_%" PRIu16 "_%" PRIu16 "_%" PRIu16 "_%" PRIu16, Switches_State.Switch_Right, Switches_State.Switch_Left, IRSensors_Value.IRSensor_Right, IRSensors_Value.IRSensor_Left, IRDistances_Value.IRDistance_Right, IRDistances_Value.IRDistance_Left);
-    //sprintf(data,"%" PRIu16 "_%" PRIu16, IRSensors_Value.IRSensor_Right, IRSensors_Value.IRSensor_Left);
+    //sprintf(data,"%i", CurrentAngle);
 
     //traces(data);
   }
@@ -313,7 +319,7 @@ static void RoverChangeDirection(MOTOR_SPEED speed, TURN_DIRECTION direction) {
   xQueueOverwrite(Motors_Queue, (void*)&Motors_Speeds);
 }
 
-static void RoverTurn(MOTOR_SPEED speed, TURN_DIRECTION direction, ANGLE angle) {
+static ANGLE RoverTurn(MOTOR_SPEED speed, TURN_DIRECTION direction, ANGLE angle) {
 
   struct MotorsCommand Motors_Speeds;
   Motors_Speeds.Speed_0 = speed * direction;
@@ -325,6 +331,8 @@ static void RoverTurn(MOTOR_SPEED speed, TURN_DIRECTION direction, ANGLE angle) 
 	  int16_t turn_time = ((((2920/360)*angle)/speed)*LOWSPEED);
 	  vTaskDelay(turn_time/portTICK_PERIOD_MS);
   }
+
+  return direction * angle;
 }
 
 static void RoverStop() {

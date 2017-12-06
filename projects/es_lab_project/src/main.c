@@ -148,6 +148,7 @@ static void MainHandler(void *pvParameters)
   struct SuperVise SuperVisor_Commands;
 
   portBASE_TYPE Status;
+  TURN_DIRECTION TurnDirection = RIGHT;
 
   // Wait for 1 second
   vTaskDelay(1000/portTICK_PERIOD_MS);
@@ -226,17 +227,15 @@ static void MainHandler(void *pvParameters)
     	GO = false;
 
     	if(IRDistances_Value.IRDistance_Right <= 10 && IRDistances_Value.IRDistance_Left > 10) {
-    		RoverChangeDirection(FULLSPEED, LEFT);
-		} else if(IRDistances_Value.IRDistance_Left <= 10 && IRDistances_Value.IRDistance_Right > 10) {
-			RoverChangeDirection(FULLSPEED, RIGHT);
-		} else if(IRDistances_Value.IRDistance_Right <= 10 && IRDistances_Value.IRDistance_Left <= 10) {
+    	 RoverChangeDirection(FULLSPEED, LEFT);
+		  } else if(IRDistances_Value.IRDistance_Left <= 10 && IRDistances_Value.IRDistance_Right > 10) {
+			 RoverChangeDirection(FULLSPEED, RIGHT);
+		  } else if(IRDistances_Value.IRDistance_Right <= 10 && IRDistances_Value.IRDistance_Left <= 10) {
 
-			RoverStop();
-			RoverGo(FULLSPEED, BACKWARD);
-			vTaskDelay(500/portTICK_PERIOD_MS);
-			RoverStop();
-			RoverTurn(LOWSPEED, RIGHT, 60);
-			RoverStop();
+  			RoverTurn(LOWSPEED, TurnDirection, 90);
+
+        if(TurnDirection == RIGHT) TurnDirection = LEFT;
+        else TurnDirection = RIGHT;
 		}
 
   }
@@ -342,7 +341,7 @@ static void Motors(void *pvParameters)
 		    motor_set(MOTOR0, Motors_Speeds.Speed_0);
 		    motor_set(MOTOR1, Motors_Speeds.Speed_1);
 		    motor_set(MOTOR2, Motors_Speeds.Speed_2);
-
+        // Push the new command into the supervising queue
         xQueueSend(SuperVisor_Motors_Queue, (void*)&Motors_Speeds, 0);
       }
     }
@@ -357,8 +356,8 @@ static void SuperVisor(void *pvParameters)
 
   while (1)
   {
-	vTaskDelay(1000/portTICK_PERIOD_MS);
-	led_green_toggle();
+	 vTaskDelay(1000/portTICK_PERIOD_MS);
+	 led_green_toggle();
 
     if(uxQueueSpacesAvailable(SuperVisor_Motors_Queue) == 0) {
 

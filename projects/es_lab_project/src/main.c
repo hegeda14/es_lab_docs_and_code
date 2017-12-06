@@ -60,7 +60,7 @@ enum TURN_DIRECTIONS {
 };
 typedef enum TURN_DIRECTIONS TURN_DIRECTION;
 
-typedef int8_t ANGLE;
+typedef uint8_t ANGLE;
 
 struct MotorsCommand {
   int8_t Speed_0;
@@ -70,7 +70,8 @@ struct MotorsCommand {
 
 enum COMMANDS {
     RETREAT = 1,
-    SCAN = 2
+    SCAN = 2,
+	CORRIGATE = 3
 };
 typedef enum COMMANDS COMMAND;
 
@@ -163,12 +164,14 @@ static void MainHandler(void *pvParameters)
     // Stop the rover in runtime
     if(digital_get_dip(ONSWITCH) == DD_DIP_OFF) {
       RoverStop();
+      CurrentAngle = 0;
       // Block the main thread
       while(digital_get_dip(ONSWITCH) == DD_DIP_OFF);
       // Wait for 2 second
       vTaskDelay(2000/portTICK_PERIOD_MS);
+
       /*RoverStop();
-      RoverTurn(LOWSPEED, RIGHT, 120);
+      RoverTurn(LOWSPEED, RIGHT, 180);
       RoverStop();
       vTaskDelay(10000/portTICK_PERIOD_MS);*/
     }
@@ -176,6 +179,11 @@ static void MainHandler(void *pvParameters)
     // Wait for 10ms
     vTaskDelay(10/portTICK_PERIOD_MS);
 
+    if(CurrentAngle > 180) { // Too right
+    	while(CurrentAngle > 180) CurrentAngle -= 360;
+    } else if (CurrentAngle < -180) { // Too left
+    	while(CurrentAngle < -180) CurrentAngle += 360;
+    }
 
     xQueueReceive(Switches_Queue, &Switches_State, 0);
     xQueueReceive(IRSensors_Queue, &IRSensors_Value, 0);
@@ -187,17 +195,22 @@ static void MainHandler(void *pvParameters)
       switch(SuperVisor_Commands.Command) {
         case RETREAT: {
         	traces("RETREAT");
-        	CurrentAngle += RoverTurn(LOWSPEED, RIGHT, 120);
+        	CurrentAngle += RoverTurn(LOWSPEED, CurrentAngle > 0 ? LEFT : RIGHT, 120);
         } break;
         case SCAN: {
         	traces("SCAN");
         	ScanningAllowed = true;
-    		char data[28];
-    		//sprintf(data, "%d_%d_%" PRIu16 "_%" PRIu16 "_%" PRIu16 "_%" PRIu16, Switches_State.Switch_Right, Switches_State.Switch_Left, IRSensors_Value.IRSensor_Right, IRSensors_Value.IRSensor_Left, IRDistances_Value.IRDistance_Right, IRDistances_Value.IRDistance_Left);
-    		sprintf(data,"%i", CurrentAngle);
-
-    		traces(data);
         } break;
+        case CORRIGATE: {
+        	traces("CORRIGATE");
+        	/*if(CurrentAngle != 0)
+        		CurrentAngle += RoverTurn(LOWSPEED, CurrentAngle > 0 ? LEFT : RIGHT, abs(CurrentAngle));*/
+
+        	char data[28];
+        	sprintf(data,"%i", CurrentAngle);
+        	traces(data);
+
+		} break;
       }
     }
 
@@ -274,9 +287,6 @@ static void MainHandler(void *pvParameters)
 
     }
 
-    if(CurrentAngle > 120 || CurrentAngle < -120)
-    	CurrentAngle += RoverTurn(FULLSPEED, LEFT, CurrentAngle);
-
     if(GO) {
     	RoverTurned = 0;
     	RoverGo(FULLSPEED, FORWARD);
@@ -328,7 +338,7 @@ static ANGLE RoverTurn(MOTOR_SPEED speed, TURN_DIRECTION direction, ANGLE angle)
   xQueueOverwrite(Motors_Queue, (void*)&Motors_Speeds);
 
   if(angle != 0) {
-	  int16_t turn_time = ((((2920/360)*angle)/speed)*LOWSPEED);
+	  float turn_time = (((((float)2920/(float)360)*(float)angle)/(float)speed)*(float)LOWSPEED);
 	  vTaskDelay(turn_time/portTICK_PERIOD_MS);
   }
 
@@ -380,20 +390,32 @@ static void SuperVisor(void *pvParameters)
 {
   trace_init();
   struct SuperVise SuperVisor_Commands;
+  int8_t TimerTick = 0;
 
   while (1)
   {
-	 vTaskDelay(1000/portTICK_PERIOD_MS);
-	 led_green_toggle();
+	 vTaskDelay(100/portTICK_PERIOD_MS);
+	 TimerTick ++;
 
-    if(uxQueueSpacesAvailable(SuperVisor_Motors_Queue) == 0) {
-    	SuperVisor_Commands.Command = RETREAT;
-    	xQueueOverwrite(SuperVisor_Queue, (void*)&SuperVisor_Commands);
-    }
+	 if(TimerTick % 5 == 0) {
+		 led_green_toggle();
 
-    xQueueReset(SuperVisor_Motors_Queue);
-    SuperVisor_Commands.Command = SCAN;
-    xQueueSend(SuperVisor_Queue, (void*)&SuperVisor_Commands, 100/portTICK_PERIOD_MS);
+		 xQueueReset(SuperVisor_Motors_Queue);
+		 SuperVisor_Commands.Command = SCAN;
+		 xQueueSend(SuperVisor_Queue, (void*)&SuperVisor_Commands, 100/portTICK_PERIOD_MS);
+	 }
+
+	 if(TimerTick % 10 == 0) {
+		if(uxQueueSpacesAvailable(SuperVisor_Motors_Queue) == 0) {
+			SuperVisor_Commands.Command = RETREAT;
+			xQueueOverwrite(SuperVisor_Queue, (void*)&SuperVisor_Commands);
+		} else {
+			SuperVisor_Commands.Command = CORRIGATE;
+			xQueueOverwrite(SuperVisor_Queue, (void*)&SuperVisor_Commands);
+		}
+
+		TimerTick = 0;
+	 }
   }
 }
 

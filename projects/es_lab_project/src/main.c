@@ -71,7 +71,7 @@ struct MotorsCommand {
 enum COMMANDS {
     RETREAT = 1,
     SCAN = 2,
-	CORRIGATE = 3
+	CORRECTION = 3
 };
 typedef enum COMMANDS COMMAND;
 
@@ -178,31 +178,31 @@ static void MainHandler(void *pvParameters)
 
     // Wait for 10ms
     vTaskDelay(10/portTICK_PERIOD_MS);
-
+    // Correct the angle value
     if(CurrentAngle > 180) { // Too right
     	while(CurrentAngle > 180) CurrentAngle -= 360;
     } else if (CurrentAngle < -180) { // Too left
     	while(CurrentAngle < -180) CurrentAngle += 360;
     }
-
+    // Receive the sensor values
     xQueueReceive(Switches_Queue, &Switches_State, 0);
     xQueueReceive(IRSensors_Queue, &IRSensors_Value, 0);
     xQueueReceive(IRDistances_Queue, &IRDistances_Value, 0);
-
+    // Check the supervisor thread
     Status = xQueueReceive(SuperVisor_Queue, &SuperVisor_Commands, 0);
-
+    // If there is something in it
     if(Status == pdPASS) {
       switch(SuperVisor_Commands.Command) {
-        case RETREAT: {
+        case RETREAT: { // Turn back, you are trapped!
         	traces("RETREAT");
         	CurrentAngle += RoverTurn(LOWSPEED, CurrentAngle > 0 ? LEFT : RIGHT, 120);
         } break;
-        case SCAN: {
+        case SCAN: { // Search for the target
         	traces("SCAN");
         	ScanningAllowed = true;
         } break;
-        case CORRIGATE: {
-        	traces("CORRIGATE");
+        case CORRECTION: { // Correct your movement
+        	traces("CORRECTION");
         	/*if(CurrentAngle != 0)
         		CurrentAngle += RoverTurn(LOWSPEED, CurrentAngle > 0 ? LEFT : RIGHT, abs(CurrentAngle));*/
 
@@ -224,30 +224,32 @@ static void MainHandler(void *pvParameters)
 
     // Implement controlling logic
 
+    // Allow the movement
     bool GO = true;
-
+    // Check the switch states
     if(Switches_State.Switch_Right == SWITCHON || Switches_State.Switch_Left == SWITCHON) {
-      RoverStop();
-      RoverGo(FULLSPEED, BACKWARD);
-      vTaskDelay(250/portTICK_PERIOD_MS);
-      RoverStop();
+    	// Go back a little bit
+		RoverStop();
+		RoverGo(FULLSPEED, BACKWARD);
+		vTaskDelay(250/portTICK_PERIOD_MS);
+		RoverStop();
+		// Turn, based on the pressed switch
+		if(Switches_State.Switch_Right == SWITCHON && Switches_State.Switch_Left == SWITCHOFF) {
+			CurrentAngle += RoverTurn(LOWSPEED, LEFT, 60);
+		} else if (Switches_State.Switch_Right == SWITCHOFF && Switches_State.Switch_Left == SWITCHON) {
+			CurrentAngle += RoverTurn(LOWSPEED, RIGHT, 60);
+		} else {
+			CurrentAngle += RoverTurn(LOWSPEED, CurrentAngle > 0 ? LEFT : RIGHT, 90);
+		}
 
-      if(Switches_State.Switch_Right == SWITCHON && Switches_State.Switch_Left == SWITCHOFF) {
-    	  CurrentAngle += RoverTurn(LOWSPEED, LEFT, 60);
-      } else if (Switches_State.Switch_Right == SWITCHOFF && Switches_State.Switch_Left == SWITCHON) {
-    	  CurrentAngle += RoverTurn(LOWSPEED, RIGHT, 60);
-      } else {
-    	  CurrentAngle += RoverTurn(LOWSPEED, CurrentAngle > 0 ? LEFT : RIGHT, 90);
-      }
-
-      RoverStop();
+		RoverStop();
     }
 
-
+    // Check the distance sensors
     if(IRDistances_Value.IRDistance_Right <= 10 || IRDistances_Value.IRDistance_Left <= 10) {
-
+    	// Disable the forward moving
     	GO = false;
-
+    	// Turn 30° to the free way
     	if(IRDistances_Value.IRDistance_Right <= 10 && IRDistances_Value.IRDistance_Left > 10) {
     		//RoverChangeDirection(FULLSPEED, LEFT);
     		CurrentAngle += RoverTurn(FULLSPEED, LEFT, 30);
@@ -256,8 +258,9 @@ static void MainHandler(void *pvParameters)
 			CurrentAngle += RoverTurn(FULLSPEED, RIGHT, 30);
 		} else if(IRDistances_Value.IRDistance_Right <= 10 && IRDistances_Value.IRDistance_Left <= 10) {
 			CurrentAngle += RoverTurn(LOWSPEED, CurrentAngle > 0 ? LEFT : RIGHT, 90);
-
+			// If the obstacle is in the front
 			RoverTurned ++;
+			// If we trapped in a corner
 			if(RoverTurned >= 2 ) {
 				CurrentAngle += RoverTurn(LOWSPEED, CurrentAngle > 0 ? RIGHT : LEFT, 90);
 			}
@@ -268,9 +271,9 @@ static void MainHandler(void *pvParameters)
 
     // Main task -> Keep the target locked
     if(ScanningAllowed && (IRSensors_Value.IRSensor_Right != 0 || IRSensors_Value.IRSensor_Left != 0)) {
-
+    	// Disable the forward moving
     	GO = false;
-
+    	// Turn to the targets direction
 		if(IRSensors_Value.IRSensor_Right != 0 && IRSensors_Value.IRSensor_Left == 0) {
 			//RoverChangeDirection(FULLSPEED, RIGHT);
 			CurrentAngle += RoverTurn(FULLSPEED, RIGHT, 30);
@@ -282,11 +285,10 @@ static void MainHandler(void *pvParameters)
 		} else {
 			GO = true;
 		}
-
+		// Scan, just when the SuperVisor allows it
 		ScanningAllowed = false;
-
     }
-
+    // If everything is fine, go forward
     if(GO) {
     	RoverTurned = 0;
     	RoverGo(FULLSPEED, FORWARD);
@@ -295,7 +297,6 @@ static void MainHandler(void *pvParameters)
     //char data[28];
     //sprintf(data, "%d_%d_%" PRIu16 "_%" PRIu16 "_%" PRIu16 "_%" PRIu16, Switches_State.Switch_Right, Switches_State.Switch_Left, IRSensors_Value.IRSensor_Right, IRSensors_Value.IRSensor_Left, IRDistances_Value.IRDistance_Right, IRDistances_Value.IRDistance_Left);
     //sprintf(data,"%i", CurrentAngle);
-
     //traces(data);
   }
 }
@@ -338,6 +339,7 @@ static ANGLE RoverTurn(MOTOR_SPEED speed, TURN_DIRECTION direction, ANGLE angle)
   xQueueOverwrite(Motors_Queue, (void*)&Motors_Speeds);
 
   if(angle != 0) {
+	  // Calculate the turning time, based on preliminary measurements
 	  float turn_time = (((((float)2920/(float)360)*(float)angle)/(float)speed)*(float)LOWSPEED);
 	  vTaskDelay(turn_time/portTICK_PERIOD_MS);
   }
@@ -396,21 +398,23 @@ static void SuperVisor(void *pvParameters)
   {
 	 vTaskDelay(100/portTICK_PERIOD_MS);
 	 TimerTick ++;
-
+	 // Every 500ms
 	 if(TimerTick % 5 == 0) {
+		 // Show that we are alive
 		 led_green_toggle();
-
+		 // Sacn for the target
 		 xQueueReset(SuperVisor_Motors_Queue);
 		 SuperVisor_Commands.Command = SCAN;
 		 xQueueSend(SuperVisor_Queue, (void*)&SuperVisor_Commands, 100/portTICK_PERIOD_MS);
 	 }
-
+	 // Every 1000ms
 	 if(TimerTick % 10 == 0) {
+		 // In case of overflow, turn around
 		if(uxQueueSpacesAvailable(SuperVisor_Motors_Queue) == 0) {
 			SuperVisor_Commands.Command = RETREAT;
 			xQueueOverwrite(SuperVisor_Queue, (void*)&SuperVisor_Commands);
 		} else {
-			SuperVisor_Commands.Command = CORRIGATE;
+			SuperVisor_Commands.Command = CORRECTION;
 			xQueueOverwrite(SuperVisor_Queue, (void*)&SuperVisor_Commands);
 		}
 

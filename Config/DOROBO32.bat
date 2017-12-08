@@ -1,7 +1,7 @@
 @ECHO OFF
 REM CLS
 REM COM PORT Nummer in Geraetemanager nachschauen und eintragen
-SET COMPORT=11
+SET COMPORT=7
 
 REM Manuelle Uebergabe des Dateinamens
 REM SET HEXFILEPATH="C:\Users\Public\Documents\Dorobo32\Installation\Programming Software\DFU\dfu util 0.8\DOROBO32_CubemxTEST.hex"

@@ -190,8 +190,8 @@ static void MainHandler(void *pvParameters)
     if(Status == pdPASS) {
       switch(SuperVisor_Commands.Command) {
         case RETREAT: { // Turn back, you are trapped!
-        	traces("RETREAT");
-        	correctAngle(RoverTurn(LOWSPEED, CurrentAngle > 0 ? LEFT : RIGHT, 120), &CurrentAngle);
+        	//traces("RETREAT");
+        	correctAngle(RoverTurn(LOWSPEED, CurrentAngle >= 0 ? RIGHT : LEFT, 120), &CurrentAngle);
         } break;
         case SCAN: { // Search for the target
         	//traces("SCAN");
@@ -230,33 +230,41 @@ static void MainHandler(void *pvParameters)
 		} else if (Switches_State.Switch_Right == SWITCHOFF && Switches_State.Switch_Left == SWITCHON) {
 			correctAngle(RoverTurn(LOWSPEED, RIGHT, 60), &CurrentAngle);
 		} else {
-			correctAngle(RoverTurn(LOWSPEED, CurrentAngle > 0 ? LEFT : RIGHT, 90), &CurrentAngle);
+			correctAngle(RoverTurn(LOWSPEED, CurrentAngle >= 0 ? RIGHT : LEFT, 90), &CurrentAngle);
 		}
 
 		RoverStop();
     }
 
     // Check the distance sensors
-    if(IRDistances_Value.IRDistance_Right <= 10 || IRDistances_Value.IRDistance_Left <= 10) {
+    if(IRDistances_Value.IRDistance_Right <= 20 || IRDistances_Value.IRDistance_Left <= 20) {
     	// Disable the forward moving
     	GO = false;
     	// Turn 30° to the free way
     	if(IRDistances_Value.IRDistance_Right <= 10 && IRDistances_Value.IRDistance_Left > 10) {
     		//RoverChangeDirection(FULLSPEED, LEFT);
-    		correctAngle(RoverTurn(FULLSPEED, LEFT, 30), &CurrentAngle);
+    		if(IRDistances_Value.IRDistance_Left <= 20)
+    			correctAngle(RoverTurn(LOWSPEED, CurrentAngle >= 0 ? RIGHT : LEFT, 60), &CurrentAngle);
+    		else
+    			correctAngle(RoverTurn(FULLSPEED, LEFT, 30), &CurrentAngle);
 		} else if(IRDistances_Value.IRDistance_Left <= 10 && IRDistances_Value.IRDistance_Right > 10) {
 			//RoverChangeDirection(FULLSPEED, RIGHT);
-			correctAngle(RoverTurn(FULLSPEED, RIGHT, 30), &CurrentAngle);
+			if(IRDistances_Value.IRDistance_Right <= 20)
+				correctAngle(RoverTurn(LOWSPEED, CurrentAngle >= 0 ? RIGHT : LEFT, 60), &CurrentAngle);
+			else
+				correctAngle(RoverTurn(FULLSPEED, RIGHT, 30), &CurrentAngle);
 		} else if(IRDistances_Value.IRDistance_Right <= 10 && IRDistances_Value.IRDistance_Left <= 10) {
-			correctAngle(RoverTurn(LOWSPEED, CurrentAngle > 0 ? LEFT : RIGHT, 90), &CurrentAngle);
+			correctAngle(RoverTurn(LOWSPEED, CurrentAngle >= 0 ? RIGHT : LEFT, 90), &CurrentAngle);
 			// If the obstacle is in the front
 			RoverTurned ++;
 			// If we trapped in a corner
 			if(RoverTurned >= 2 ) {
-				correctAngle(RoverTurn(LOWSPEED, CurrentAngle > 0 ? RIGHT : LEFT, 90), &CurrentAngle);
+				correctAngle(RoverTurn(LOWSPEED, CurrentAngle >= 0 ? LEFT : RIGHT, 90), &CurrentAngle);
 			}
 
 			RoverStop();
+		} else {
+			GO = true;
 		}
 	}
 
@@ -271,7 +279,7 @@ static void MainHandler(void *pvParameters)
 			RoverStop();
 		} else if(IRSensors_Value.IRSensor_Right == 0 && IRSensors_Value.IRSensor_Left != 0) {
 			//RoverChangeDirection(FULLSPEED, LEFT);
-			RoverTurn(FULLSPEED, LEFT, 30);
+			correctAngle(RoverTurn(FULLSPEED, LEFT, 30), &CurrentAngle);
 			RoverStop();
 		} else {
 			GO = true;

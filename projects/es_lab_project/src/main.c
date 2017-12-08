@@ -60,7 +60,7 @@ enum TURN_DIRECTIONS {
 };
 typedef enum TURN_DIRECTIONS TURN_DIRECTION;
 
-typedef uint8_t ANGLE;
+typedef int16_t ANGLE;
 
 struct MotorsCommand {
   int8_t Speed_0;
@@ -113,6 +113,7 @@ static void RoverStop();
 static void RoverChangeDirection(MOTOR_SPEED, TURN_DIRECTION);
 
 static bool isRoverStopped();
+static void correctAngle(ANGLE angle, ANGLE *CurrentAngle);
 
 int main()
 {
@@ -150,7 +151,7 @@ static void MainHandler(void *pvParameters)
 
   portBASE_TYPE Status;
   int8_t RoverTurned = 0;
-  int16_t CurrentAngle = 0;
+  ANGLE CurrentAngle = 0;
   bool ScanningAllowed = true;
 
   // Wait for 1 second
@@ -171,19 +172,14 @@ static void MainHandler(void *pvParameters)
       vTaskDelay(2000/portTICK_PERIOD_MS);
 
       /*RoverStop();
-      RoverTurn(LOWSPEED, RIGHT, 180);
+      RoverTurn(FULLSPEED, RIGHT, 180);
       RoverStop();
       vTaskDelay(10000/portTICK_PERIOD_MS);*/
     }
 
     // Wait for 10ms
     vTaskDelay(10/portTICK_PERIOD_MS);
-    // Correct the angle value
-    if(CurrentAngle > 180) { // Too right
-    	while(CurrentAngle > 180) CurrentAngle -= 360;
-    } else if (CurrentAngle < -180) { // Too left
-    	while(CurrentAngle < -180) CurrentAngle += 360;
-    }
+
     // Receive the sensor values
     xQueueReceive(Switches_Queue, &Switches_State, 0);
     xQueueReceive(IRSensors_Queue, &IRSensors_Value, 0);
@@ -195,21 +191,16 @@ static void MainHandler(void *pvParameters)
       switch(SuperVisor_Commands.Command) {
         case RETREAT: { // Turn back, you are trapped!
         	traces("RETREAT");
-        	CurrentAngle += RoverTurn(LOWSPEED, CurrentAngle > 0 ? LEFT : RIGHT, 120);
+        	correctAngle(RoverTurn(LOWSPEED, CurrentAngle > 0 ? LEFT : RIGHT, 120), &CurrentAngle);
         } break;
         case SCAN: { // Search for the target
-        	traces("SCAN");
+        	//traces("SCAN");
         	ScanningAllowed = true;
         } break;
         case CORRECTION: { // Correct your movement
-        	traces("CORRECTION");
+        	//traces("CORRECTION");
         	/*if(CurrentAngle != 0)
         		CurrentAngle += RoverTurn(LOWSPEED, CurrentAngle > 0 ? LEFT : RIGHT, abs(CurrentAngle));*/
-
-        	char data[28];
-        	sprintf(data,"%i", CurrentAngle);
-        	traces(data);
-
 		} break;
       }
     }
@@ -235,11 +226,11 @@ static void MainHandler(void *pvParameters)
 		RoverStop();
 		// Turn, based on the pressed switch
 		if(Switches_State.Switch_Right == SWITCHON && Switches_State.Switch_Left == SWITCHOFF) {
-			CurrentAngle += RoverTurn(LOWSPEED, LEFT, 60);
+			correctAngle(RoverTurn(LOWSPEED, LEFT, 60), &CurrentAngle);
 		} else if (Switches_State.Switch_Right == SWITCHOFF && Switches_State.Switch_Left == SWITCHON) {
-			CurrentAngle += RoverTurn(LOWSPEED, RIGHT, 60);
+			correctAngle(RoverTurn(LOWSPEED, RIGHT, 60), &CurrentAngle);
 		} else {
-			CurrentAngle += RoverTurn(LOWSPEED, CurrentAngle > 0 ? LEFT : RIGHT, 90);
+			correctAngle(RoverTurn(LOWSPEED, CurrentAngle > 0 ? LEFT : RIGHT, 90), &CurrentAngle);
 		}
 
 		RoverStop();
@@ -252,17 +243,17 @@ static void MainHandler(void *pvParameters)
     	// Turn 30° to the free way
     	if(IRDistances_Value.IRDistance_Right <= 10 && IRDistances_Value.IRDistance_Left > 10) {
     		//RoverChangeDirection(FULLSPEED, LEFT);
-    		CurrentAngle += RoverTurn(FULLSPEED, LEFT, 30);
+    		correctAngle(RoverTurn(FULLSPEED, LEFT, 30), &CurrentAngle);
 		} else if(IRDistances_Value.IRDistance_Left <= 10 && IRDistances_Value.IRDistance_Right > 10) {
 			//RoverChangeDirection(FULLSPEED, RIGHT);
-			CurrentAngle += RoverTurn(FULLSPEED, RIGHT, 30);
+			correctAngle(RoverTurn(FULLSPEED, RIGHT, 30), &CurrentAngle);
 		} else if(IRDistances_Value.IRDistance_Right <= 10 && IRDistances_Value.IRDistance_Left <= 10) {
-			CurrentAngle += RoverTurn(LOWSPEED, CurrentAngle > 0 ? LEFT : RIGHT, 90);
+			correctAngle(RoverTurn(LOWSPEED, CurrentAngle > 0 ? LEFT : RIGHT, 90), &CurrentAngle);
 			// If the obstacle is in the front
 			RoverTurned ++;
 			// If we trapped in a corner
 			if(RoverTurned >= 2 ) {
-				CurrentAngle += RoverTurn(LOWSPEED, CurrentAngle > 0 ? RIGHT : LEFT, 90);
+				correctAngle(RoverTurn(LOWSPEED, CurrentAngle > 0 ? RIGHT : LEFT, 90), &CurrentAngle);
 			}
 
 			RoverStop();
@@ -276,11 +267,11 @@ static void MainHandler(void *pvParameters)
     	// Turn to the targets direction
 		if(IRSensors_Value.IRSensor_Right != 0 && IRSensors_Value.IRSensor_Left == 0) {
 			//RoverChangeDirection(FULLSPEED, RIGHT);
-			CurrentAngle += RoverTurn(FULLSPEED, RIGHT, 30);
+			correctAngle(RoverTurn(FULLSPEED, RIGHT, 30), &CurrentAngle);
 			RoverStop();
 		} else if(IRSensors_Value.IRSensor_Right == 0 && IRSensors_Value.IRSensor_Left != 0) {
 			//RoverChangeDirection(FULLSPEED, LEFT);
-			CurrentAngle += RoverTurn(FULLSPEED, LEFT, 30);
+			RoverTurn(FULLSPEED, LEFT, 30);
 			RoverStop();
 		} else {
 			GO = true;
@@ -355,6 +346,22 @@ static void RoverStop() {
   xQueueOverwrite(Motors_Queue, (void*)&Motors_Speeds);
   // Default 250ms delay after stop
   vTaskDelay(250/portTICK_PERIOD_MS);
+}
+
+static void correctAngle(ANGLE angle, ANGLE *CurrentAngle) {
+
+	*CurrentAngle += angle;
+
+    // Correct the angle value
+    if(*CurrentAngle > 180) { // Too right
+    	while(*CurrentAngle > 180) *CurrentAngle -= 360;
+    } else if (*CurrentAngle < -180) { // Too left
+    	while(*CurrentAngle < -180) *CurrentAngle += 360;
+    }
+
+	char data[28];
+	sprintf(data,"%i", *CurrentAngle);
+	traces(data);
 }
 
 static void Motors(void *pvParameters)
